@@ -1,0 +1,6 @@
+{
+  "name": "Validasi Master Data Functional Location (FL)",
+  "description": "Tools validasi dan perbaikan otomatis data migrasi Functional Location (FL) SAP PM berdasarkan hierarki Plant-City LOV dan standar struktur ZFS04.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
