@@ -361,6 +361,11 @@ export const DataGrid: React.FC<DataGridProps> = ({
                             </span>,
                             true
                           )}
+                          {supIssue?.rule === 'RULE_HIERARCHY_VIOLATION' && (
+                            <span className="text-[9px] font-mono font-bold text-rose-700 bg-rose-50 border border-rose-200 px-1 py-0.2 rounded w-fit mt-0.5">
+                              Hierarchy Violation
+                            </span>
+                          )}
                           {isFieldRepaired(record, 'superiorFunctLoc') && (
                             <span className="text-[10px] text-slate-400 line-through font-mono">
                               {record.originalData.superiorFunctLoc}

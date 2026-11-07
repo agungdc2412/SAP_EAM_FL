@@ -1,9 +1,10 @@
-import { FLRowData, FLRowRecord, ValidationIssue, ValidationSummary, FL_COLUMNS } from '../types/flTypes';
+import { FLRowData, FLRowRecord, ValidationIssue, ValidationSummary, FL_COLUMNS, FunclocModule } from '../types/flTypes';
 import { findLovByCityName, findLovByCityId, findLovByPlantAndCity, fuzzyMatchCityName } from '../data/lovDatabase';
+import { findSniByCityName, findSniByCityId, findSniByPlantAndCity, fuzzyMatchSniCityName } from '../data/sniDatabase';
 
 /**
  * Extracts the 3-character city code from Column A (digit 6-8, 1-indexed)
- * E.g., for "1011-LBP-T00014433-20351H000.1.01897", returns "LBP"
+ * E.g., for "1011-LBP-T00014433-20351H000.1.01897" or "1011-ARS-000000001", returns "LBP" or "ARS"
  */
 export function extractDigit6to8(flCode: string): string {
   if (!flCode) return '';
@@ -154,7 +155,159 @@ export function validateCoordinate(rawCoord: string): {
  * Validates a single row against all SAP PM Functional Location rules
  * NOTE: Column A (Functional Location) is strictly IMMUTABLE PRIMARY KEY.
  */
-export function validateFLRow(data: FLRowData, rowIndex: number, id: string, originalData?: FLRowData): FLRowRecord {
+/**
+ * Looks up city in the appropriate reference database based on active module.
+ * In ZFS01-NBB: Prioritizes SNI Master Database (424 items), fallback to ZFS04 LOV.
+ * In ZFS04-OSP/BB: Prioritizes LOV Database (111 items), fallback to SNI Database.
+ */
+export function lookupCityReference(cityName: string, module: FunclocModule = 'ZFS04'): {
+  item?: {
+    cityName: string;
+    cityId: string;
+    plant: string;
+    workCenter: string;
+    costCenter: string;
+    source: 'SNI' | 'ZFS04';
+  };
+  fuzzySuggestion?: {
+    cityHomepass: string;
+    cityId: string;
+    similarity: number;
+    confidence: 'HIGH' | 'MEDIUM' | 'LOW';
+    sourceTable: 'SNI' | 'ZFS04';
+  };
+} {
+  if (!cityName || !cityName.trim()) return {};
+  const trimmed = cityName.trim();
+
+  if (module === 'ZFS01') {
+    // 1. Check SNI Database first
+    const sni = findSniByCityName(trimmed);
+    if (sni) {
+      return {
+        item: {
+          cityName: sni.citySni,
+          cityId: sni.cityId,
+          plant: sni.plant,
+          workCenter: sni.workCenter,
+          costCenter: sni.costCenter,
+          source: 'SNI'
+        }
+      };
+    }
+    // 2. Check ZFS04 LOV as fallback
+    const lov = findLovByCityName(trimmed);
+    if (lov) {
+      return {
+        item: {
+          cityName: lov.cityHomepass,
+          cityId: lov.cityId,
+          plant: lov.plant,
+          workCenter: lov.workCenter,
+          costCenter: lov.costCenter,
+          source: 'ZFS04'
+        }
+      };
+    }
+    // 3. Fuzzy match in SNI
+    const fuzzySni = fuzzyMatchSniCityName(trimmed);
+    if (fuzzySni && fuzzySni.similarity >= 0.55) {
+      return {
+        fuzzySuggestion: {
+          cityHomepass: fuzzySni.sniItem.citySni,
+          cityId: fuzzySni.sniItem.cityId,
+          similarity: fuzzySni.similarity,
+          confidence: fuzzySni.confidence,
+          sourceTable: 'SNI'
+        }
+      };
+    }
+    // 4. Fuzzy match in LOV
+    const fuzzyLov = fuzzyMatchCityName(trimmed);
+    if (fuzzyLov && fuzzyLov.similarity >= 0.55) {
+      return {
+        fuzzySuggestion: {
+          cityHomepass: fuzzyLov.lovItem.cityHomepass,
+          cityId: fuzzyLov.lovItem.cityId,
+          similarity: fuzzyLov.similarity,
+          confidence: fuzzyLov.confidence,
+          sourceTable: 'ZFS04'
+        }
+      };
+    }
+  } else {
+    // ZFS04 module
+    // 1. Check LOV Database first
+    const lov = findLovByCityName(trimmed);
+    if (lov) {
+      return {
+        item: {
+          cityName: lov.cityHomepass,
+          cityId: lov.cityId,
+          plant: lov.plant,
+          workCenter: lov.workCenter,
+          costCenter: lov.costCenter,
+          source: 'ZFS04'
+        }
+      };
+    }
+    // 2. Check SNI Database as fallback
+    const sni = findSniByCityName(trimmed);
+    if (sni) {
+      return {
+        item: {
+          cityName: sni.citySni,
+          cityId: sni.cityId,
+          plant: sni.plant,
+          workCenter: sni.workCenter,
+          costCenter: sni.costCenter,
+          source: 'SNI'
+        }
+      };
+    }
+    // 3. Fuzzy match in LOV
+    const fuzzyLov = fuzzyMatchCityName(trimmed);
+    if (fuzzyLov && fuzzyLov.similarity >= 0.55) {
+      return {
+        fuzzySuggestion: {
+          cityHomepass: fuzzyLov.lovItem.cityHomepass,
+          cityId: fuzzyLov.lovItem.cityId,
+          similarity: fuzzyLov.similarity,
+          confidence: fuzzyLov.confidence,
+          sourceTable: 'ZFS04'
+        }
+      };
+    }
+    // 4. Fuzzy match in SNI
+    const fuzzySni = fuzzyMatchSniCityName(trimmed);
+    if (fuzzySni && fuzzySni.similarity >= 0.55) {
+      return {
+        fuzzySuggestion: {
+          cityHomepass: fuzzySni.sniItem.citySni,
+          cityId: fuzzySni.sniItem.cityId,
+          similarity: fuzzySni.similarity,
+          confidence: fuzzySni.confidence,
+          sourceTable: 'SNI'
+        }
+      };
+    }
+  }
+
+  return {};
+}
+
+/**
+ * Validates a single row against all SAP PM Functional Location rules
+ * Adapts dynamically based on active module: 'ZFS01' (Non-Broadband) or 'ZFS04' (OSP/Broadband)
+ * NOTE: Column A (Functional Location) is strictly IMMUTABLE PRIMARY KEY.
+ */
+export function validateFLRow(
+  data: FLRowData, 
+  rowIndex: number, 
+  id: string, 
+  originalData?: FLRowData, 
+  module: FunclocModule = 'ZFS04'
+): FLRowRecord {
   const issues: ValidationIssue[] = [];
   const flCode = (data.functionalLocation || '').trim();
   const superiorFl = (data.superiorFunctLoc || '').trim();
@@ -163,18 +316,31 @@ export function validateFLRow(data: FLRowData, rowIndex: number, id: string, ori
   const cityIdGenerated = (data.cityIdGenerated || '').trim().toUpperCase();
   const country = (data.country || '').trim().toUpperCase();
 
-  // Lookup in LOV
-  const lovFromCity = findLovByCityName(cityName);
+  // Lookup in active module's reference database (SNI for ZFS01, LOV for ZFS04)
+  const { item: refItem, fuzzySuggestion: fuzzyCitySuggestion } = lookupCityReference(cityName, module);
   const digit6to8 = extractDigit6to8(flCode);
 
-  // -------------------------------------------------------------
-  // RULE 1: VALIDASI KOLOM SUPERRIOR (D) FL DENGAN KODE FL DIKOLOM (A)
-  // HARUS SESUAI DENGAN KONFIGURASI FL LEV2 GENERAL (PLANT-CITY)
-  // Kolom A adalah Primary Key, maka Kolom D yang disesuaikan mengikuti Kolom A.
-  // -------------------------------------------------------------
-  const flLev2 = extractLev2General(flCode);
-  const supLev2 = extractLev2General(superiorFl);
+  // Expected Superior FL based on module hierarchy
+  // In ZFS01: Level 2 -> [Plant]-[CityID], e.g. 1011-ARS
+  // In ZFS04: Level 3 -> [Plant]-[CityID]-[Pole], e.g. 1011-LBP-T00014433
+  const flParts = flCode.split('-');
+  const lastHyphen = flCode.lastIndexOf('-');
+  let expectedSup = '';
+  if (module === 'ZFS01') {
+    expectedSup = flParts.length >= 2 ? `${flParts[0]}-${flParts[1]}` : flCode;
+  } else {
+    expectedSup = flParts.length > 3 
+      ? flParts.slice(0, 3).join('-') 
+      : (lastHyphen > 0 ? flCode.substring(0, lastHyphen) : flCode);
+  }
 
+  // -------------------------------------------------------------
+  // PARENT-CHILD HIERARCHY CHECK:
+  // For every row, ensure that if a 'Superior Functional Location' (Column D) is defined,
+  // the string in Column A starts with the string in Column D followed by a '-' separator.
+  // Add a new 'Hierarchy Violation' error type if the structure is inconsistent.
+  // Kolom A adalah Primary Key (IMMUTABLE), sehingga Kolom D yang disesuaikan.
+  // -------------------------------------------------------------
   if (!flCode) {
     issues.push({
       id: `${id}_r1_fl_empty`,
@@ -185,25 +351,37 @@ export function validateFLRow(data: FLRowData, rowIndex: number, id: string, ori
       message: 'Kode Functional Location (Kolom A) sebagai Primary Key tidak boleh kosong.',
       canAutoFix: false
     });
-  }
-
-  if (!superiorFl && flCode) {
-    const expectedSup = flCode.split('-').slice(0, 3).join('-');
+  } else if (!superiorFl) {
     issues.push({
       id: `${id}_r1_sup_empty`,
       rule: 'RULE_1_SUPERIOR_FL',
       field: 'superiorFunctLoc',
       columnLetter: 'D',
       severity: 'error',
-      message: 'Superior FunctLoc. (Kolom D) tidak boleh kosong.',
+      message: `Superior FunctLoc. (Kolom D) tidak boleh kosong. Wajib sesuai hierarki modul ${module} ('${expectedSup}').`,
       suggestedFix: expectedSup,
       canAutoFix: true
     });
-  } else if (flLev2 && supLev2) {
-    // Check if Superior FL prefix matches FL Code prefix
-    if (flLev2.formatted !== supLev2.formatted) {
-      const flParts = flCode.split('-');
-      const expectedSup = flParts.length >= 3 ? flParts.slice(0, 3).join('-') : `${flLev2.formatted}-${superiorFl.split('-')[2] || 'POLE'}`;
+  } else {
+    // Column D is defined! Perform Parent-Child Hierarchy Check
+    const expectedPrefix = `${superiorFl}-`;
+    if (!flCode.startsWith(expectedPrefix)) {
+      issues.push({
+        id: `${id}_hierarchy_violation`,
+        rule: 'RULE_HIERARCHY_VIOLATION',
+        field: 'superiorFunctLoc',
+        columnLetter: 'D',
+        severity: 'error',
+        message: `Hierarchy Violation: Kode Functional Location (Kolom A: '${flCode}') harus diawali oleh Superior FunctLoc (Kolom D: '${superiorFl}') yang dipisahkan oleh separator '-'.`,
+        suggestedFix: expectedSup,
+        canAutoFix: true // Column A is PK and immutable; Column D is updated to match parent
+      });
+    }
+
+    // Also check Lev 2 General prefix (Plant-City)
+    const flLev2 = extractLev2General(flCode);
+    const supLev2 = extractLev2General(superiorFl);
+    if (flLev2 && supLev2 && flLev2.formatted !== supLev2.formatted) {
       issues.push({
         id: `${id}_r1_mismatch_lev2`,
         rule: 'RULE_1_SUPERIOR_FL',
@@ -211,19 +389,6 @@ export function validateFLRow(data: FLRowData, rowIndex: number, id: string, ori
         columnLetter: 'D',
         severity: 'error',
         message: `Prefix Lev 2 Superior FL ('${supLev2.formatted}') tidak sesuai dengan Primary Key FL Kolom A ('${flLev2.formatted}').`,
-        suggestedFix: expectedSup,
-        canAutoFix: true // Superior FL will be fixed to match Primary Key Column A
-      });
-    } else if (!flCode.startsWith(superiorFl)) {
-      const flParts = flCode.split('-');
-      const expectedSup = flParts.slice(0, 3).join('-');
-      issues.push({
-        id: `${id}_r1_mismatch_pole`,
-        rule: 'RULE_1_SUPERIOR_FL',
-        field: 'superiorFunctLoc',
-        columnLetter: 'D',
-        severity: 'warning',
-        message: `Superior FL ('${superiorFl}') tidak sinkron dengan hierarki Pole Kolom A ('${expectedSup}').`,
         suggestedFix: expectedSup,
         canAutoFix: true
       });
@@ -263,10 +428,8 @@ export function validateFLRow(data: FLRowData, rowIndex: number, id: string, ori
 
   // -------------------------------------------------------------
   // RULE 3: GENERATE CITY NAME MENJADI CITY ID PADA KOLOM BARU (AH)
-  // 3 DIGIT menggunakan referensi file LOV
+  // 3 DIGIT menggunakan referensi file SNI (ZFS01) atau LOV (ZFS04)
   // -------------------------------------------------------------
-  let fuzzyCitySuggestion: { cityHomepass: string; cityId: string; similarity: number; confidence: 'HIGH' | 'MEDIUM' | 'LOW' } | undefined = undefined;
-
   if (!cityName) {
     issues.push({
       id: `${id}_r3_city_empty`,
@@ -274,28 +437,19 @@ export function validateFLRow(data: FLRowData, rowIndex: number, id: string, ori
       field: 'city',
       columnLetter: 'AB',
       severity: 'warning',
-      message: 'Nama City pada Kolom AB kosong. Tidak dapat mencocokkan LOV City ID secara otomatis.',
+      message: 'Nama City pada Kolom AB kosong. Tidak dapat mencocokkan City ID secara otomatis.',
       canAutoFix: false
     });
-  } else if (!lovFromCity) {
-    // Check fuzzy match for possible typo
-    const fuzzy = fuzzyMatchCityName(cityName);
-    if (fuzzy && fuzzy.similarity >= 0.55) {
-      fuzzyCitySuggestion = {
-        cityHomepass: fuzzy.lovItem.cityHomepass,
-        cityId: fuzzy.lovItem.cityId,
-        similarity: fuzzy.similarity,
-        confidence: fuzzy.confidence
-      };
-
+  } else if (!refItem) {
+    if (fuzzyCitySuggestion) {
       issues.push({
         id: `${id}_r3_city_fuzzy`,
         rule: 'RULE_3_CITY_NAME_TO_CITY_ID',
         field: 'city',
         columnLetter: 'AB',
         severity: 'warning',
-        message: `Terindikasi typo pada '${cityName}'. Saran LOV: '${fuzzy.lovItem.cityHomepass}' (City ID: ${fuzzy.lovItem.cityId}, Akurasi: ${Math.round(fuzzy.similarity * 100)}%).`,
-        suggestedFix: fuzzy.lovItem.cityHomepass,
+        message: `Terindikasi perbedaan penulisan pada '${cityName}'. Saran Referensi ${fuzzyCitySuggestion.sourceTable || module}: '${fuzzyCitySuggestion.cityHomepass}' (City ID: ${fuzzyCitySuggestion.cityId}, Akurasi: ${Math.round(fuzzyCitySuggestion.similarity * 100)}%).`,
+        suggestedFix: fuzzyCitySuggestion.cityHomepass,
         canAutoFix: true
       });
     } else {
@@ -305,13 +459,13 @@ export function validateFLRow(data: FLRowData, rowIndex: number, id: string, ori
         field: 'city',
         columnLetter: 'AB',
         severity: 'warning',
-        message: `City '${cityName}' tidak ditemukan dalam referensi LOV 111 kota.`,
+        message: `City '${cityName}' tidak ditemukan dalam referensi ${module === 'ZFS01' ? 'SNI 424 kota/kab' : 'LOV 111 kota'}. Gunakan tombol Fuzzy Matching untuk mencocokkan.`,
         canAutoFix: false
       });
     }
   } else {
-    // City name found in LOV -> target City ID should be in Column AH
-    const expectedCityId = lovFromCity.cityId;
+    // City name found in reference -> target City ID should be in Column AH
+    const expectedCityId = refItem.cityId;
     if (!cityIdGenerated) {
       issues.push({
         id: `${id}_r3_city_id_ah_empty`,
@@ -319,7 +473,7 @@ export function validateFLRow(data: FLRowData, rowIndex: number, id: string, ori
         field: 'cityIdGenerated',
         columnLetter: 'AH',
         severity: 'error',
-        message: `Kolom AH (City ID) kosong. Hasil generate dari '${lovFromCity.cityHomepass}' adalah '${expectedCityId}'.`,
+        message: `Kolom AH (City ID) kosong. Hasil generate dari '${refItem.cityName}' (${refItem.source}) adalah '${expectedCityId}'.`,
         suggestedFix: expectedCityId,
         canAutoFix: true
       });
@@ -330,7 +484,7 @@ export function validateFLRow(data: FLRowData, rowIndex: number, id: string, ori
         field: 'cityIdGenerated',
         columnLetter: 'AH',
         severity: 'error',
-        message: `Kolom AH City ID ('${cityIdGenerated}') tidak sesuai dengan hasil generate LOV untuk '${cityName}' ('${expectedCityId}').`,
+        message: `Kolom AH City ID ('${cityIdGenerated}') tidak sesuai dengan hasil generate referensi untuk '${cityName}' ('${expectedCityId}').`,
         suggestedFix: expectedCityId,
         canAutoFix: true
       });
@@ -339,75 +493,75 @@ export function validateFLRow(data: FLRowData, rowIndex: number, id: string, ori
 
   // -------------------------------------------------------------
   // RULE 4 & 5: VALIDATE & SYNC PLAN SECTION, PLANNING PLANT, MAINT PLANT,
-  // WORK CENTER, COST CENTER MENGIKUTI HASIL CITY ID GENERATE (LOV)
+  // WORK CENTER, COST CENTER MENGIKUTI HASIL CITY ID GENERATE
   // -------------------------------------------------------------
-  if (lovFromCity) {
+  if (refItem) {
     // Plant Section (Col H) should match generated City ID
-    if (plantSection !== lovFromCity.cityId) {
+    if (plantSection !== refItem.cityId) {
       issues.push({
         id: `${id}_r4_plan_section_sync`,
         rule: 'RULE_4_PLAN_SECTION_SYNC',
         field: 'plantSection',
         columnLetter: 'H',
         severity: 'warning',
-        message: `Plant Section Kolom H ('${plantSection || '(kosong)'}') belum mengikuti hasil City ID '${lovFromCity.cityId}' dari City Name.`,
-        suggestedFix: lovFromCity.cityId,
+        message: `Plant Section Kolom H ('${plantSection || '(kosong)'}') belum mengikuti hasil City ID '${refItem.cityId}' dari City Name.`,
+        suggestedFix: refItem.cityId,
         canAutoFix: true
       });
     }
 
     // Planning Plant (Col F)
-    if (data.planningPlant !== lovFromCity.plant) {
+    if (data.planningPlant !== refItem.plant) {
       issues.push({
         id: `${id}_r5_planning_plant`,
         rule: 'RULE_5_SAP_HIERARCHY',
         field: 'planningPlant',
         columnLetter: 'F',
         severity: 'warning',
-        message: `Planning Plant ('${data.planningPlant || '(kosong)'}') harus mengikuti LOV '${lovFromCity.plant}' (${lovFromCity.cityHomepass}).`,
-        suggestedFix: lovFromCity.plant,
+        message: `Planning Plant ('${data.planningPlant || '(kosong)'}') harus mengikuti referensi '${refItem.plant}' (${refItem.cityName}).`,
+        suggestedFix: refItem.plant,
         canAutoFix: true
       });
     }
 
     // Maint Plant (Col I)
-    if (data.maintPlant !== lovFromCity.plant) {
+    if (data.maintPlant !== refItem.plant) {
       issues.push({
         id: `${id}_r5_maint_plant`,
         rule: 'RULE_5_SAP_HIERARCHY',
         field: 'maintPlant',
         columnLetter: 'I',
         severity: 'warning',
-        message: `Maint. Plant ('${data.maintPlant || '(kosong)'}') harus mengikuti LOV '${lovFromCity.plant}' (${lovFromCity.cityHomepass}).`,
-        suggestedFix: lovFromCity.plant,
+        message: `Maint. Plant ('${data.maintPlant || '(kosong)'}') harus mengikuti referensi '${refItem.plant}' (${refItem.cityName}).`,
+        suggestedFix: refItem.plant,
         canAutoFix: true
       });
     }
 
     // Work Center (Col J)
-    if (data.workCenter !== lovFromCity.workCenter) {
+    if (data.workCenter !== refItem.workCenter) {
       issues.push({
         id: `${id}_r5_work_center`,
         rule: 'RULE_5_SAP_HIERARCHY',
         field: 'workCenter',
         columnLetter: 'J',
         severity: 'warning',
-        message: `Work Center ('${data.workCenter || '(kosong)'}') harus mengikuti LOV '${lovFromCity.workCenter}' (${lovFromCity.cityHomepass}).`,
-        suggestedFix: lovFromCity.workCenter,
+        message: `Work Center ('${data.workCenter || '(kosong)'}') harus mengikuti referensi '${refItem.workCenter}' (${refItem.cityName}).`,
+        suggestedFix: refItem.workCenter,
         canAutoFix: true
       });
     }
 
     // Cost Center (Col K)
-    if (data.costCenter !== lovFromCity.costCenter) {
+    if (data.costCenter !== refItem.costCenter) {
       issues.push({
         id: `${id}_r5_cost_center`,
         rule: 'RULE_5_SAP_HIERARCHY',
         field: 'costCenter',
         columnLetter: 'K',
         severity: 'warning',
-        message: `Cost Center ('${data.costCenter || '(kosong)'}') harus mengikuti LOV '${lovFromCity.costCenter}' (${lovFromCity.cityHomepass}).`,
-        suggestedFix: lovFromCity.costCenter,
+        message: `Cost Center ('${data.costCenter || '(kosong)'}') harus mengikuti referensi '${refItem.costCenter}' (${refItem.cityName}).`,
+        suggestedFix: refItem.costCenter,
         canAutoFix: true
       });
     }
@@ -415,7 +569,7 @@ export function validateFLRow(data: FLRowData, rowIndex: number, id: string, ori
 
   // -------------------------------------------------------------
   // RULE 6: Kolom AE (Country) isinya 'ID', bukan City ID
-  // Structure Indicator (B) isinya 'ZFS04'
+  // Structure Indicator (B) isinya ZFS01 (NBB) atau ZFS04 (OSP/BB)
   // -------------------------------------------------------------
   if (country !== 'ID') {
     issues.push({
@@ -430,15 +584,16 @@ export function validateFLRow(data: FLRowData, rowIndex: number, id: string, ori
     });
   }
 
-  if (data.structureIndicator && data.structureIndicator.toUpperCase() !== 'ZFS04') {
+  const expectedStructure = module === 'ZFS01' ? 'ZFS01' : 'ZFS04';
+  if (data.structureIndicator && data.structureIndicator.toUpperCase() !== expectedStructure) {
     issues.push({
       id: `${id}_r7_structure_ind`,
       rule: 'RULE_7_STRUCTURE_IND',
       field: 'structureIndicator',
       columnLetter: 'B',
       severity: 'warning',
-      message: `Structure indicator '${data.structureIndicator}' tidak sesuai blueprint (harus ZFS04).`,
-      suggestedFix: 'ZFS04',
+      message: `Structure indicator '${data.structureIndicator}' tidak sesuai blueprint modul ${module} (harus ${expectedStructure}).`,
+      suggestedFix: expectedStructure,
       canAutoFix: true
     });
   }
@@ -516,7 +671,7 @@ export function validateFLRow(data: FLRowData, rowIndex: number, id: string, ori
 /**
  * Validates an array of rows, computes duplicate Primary Keys, and calculates aggregate statistics
  */
-export function validateAllRows(rows: FLRowRecord[]): { records: FLRowRecord[]; summary: ValidationSummary } {
+export function validateAllRows(rows: FLRowRecord[], module: FunclocModule = 'ZFS04'): { records: FLRowRecord[]; summary: ValidationSummary } {
   let validRows = 0;
   let errorRows = 0;
   let warningRows = 0;
@@ -525,6 +680,7 @@ export function validateAllRows(rows: FLRowRecord[]): { records: FLRowRecord[]; 
 
   const ruleStats = {
     ruleDuplicatePk: 0,
+    ruleHierarchyViolation: 0,
     rule1SuperiorMismatch: 0,
     rule2DigitMismatch: 0,
     rule3CityIdMissingOrInvalid: 0,
@@ -547,7 +703,8 @@ export function validateAllRows(rows: FLRowRecord[]): { records: FLRowRecord[]; 
 
   // 2. Validate Each Row and inject duplicate issue if applicable
   const records = rows.map((record, idx) => {
-    const validated = validateFLRow(record.data, idx + 1, record.id, record.originalData);
+    const validated = validateFLRow(record.data, idx + 1, record.id, record.originalData, module);
+    validated.module = module;
     const rawFl = (validated.data.functionalLocation || '').trim().toUpperCase();
     
     // Check if Column A is duplicated across the dataset
@@ -589,6 +746,7 @@ export function validateAllRows(rows: FLRowRecord[]): { records: FLRowRecord[]; 
 
     // Accumulate other rule stats
     validated.issues.forEach(issue => {
+      if (issue.rule === 'RULE_HIERARCHY_VIOLATION') ruleStats.ruleHierarchyViolation++;
       if (issue.rule === 'RULE_1_SUPERIOR_FL') ruleStats.rule1SuperiorMismatch++;
       if (issue.rule === 'RULE_2_DIGIT_6_8_VS_PLAN') ruleStats.rule2DigitMismatch++;
       if (issue.rule === 'RULE_3_CITY_NAME_TO_CITY_ID') ruleStats.rule3CityIdMissingOrInvalid++;

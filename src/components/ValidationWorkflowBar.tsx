@@ -1,13 +1,14 @@
 import React from 'react';
-import { ValidationSummary } from '../types/flTypes';
+import { ValidationSummary, FunclocModule, MODULE_CONFIGS } from '../types/flTypes';
 import { 
   MapPin, 
   ShieldCheck, 
   CheckCircle2, 
   AlertCircle, 
-  ArrowRight,
   Sparkles,
-  KeyRound
+  KeyRound,
+  Layers,
+  Database
 } from 'lucide-react';
 
 interface ValidationWorkflowBarProps {
@@ -19,6 +20,8 @@ interface ValidationWorkflowBarProps {
   typoCityCount?: number;
   onFixAllTypos?: () => void;
   onOpenExportModal?: () => void;
+  module?: FunclocModule;
+  onOpenFuzzyModal?: () => void;
 }
 
 export const ValidationWorkflowBar: React.FC<ValidationWorkflowBarProps> = ({
@@ -29,9 +32,11 @@ export const ValidationWorkflowBar: React.FC<ValidationWorkflowBarProps> = ({
   flMismatchCount,
   typoCityCount = 0,
   onFixAllTypos,
-  onOpenExportModal
+  module = 'ZFS04',
+  onOpenFuzzyModal
 }) => {
   const { totalRows, validRows, errorRows, repairedRows } = summary;
+  const config = MODULE_CONFIGS[module];
 
   return (
     <div className="space-y-4">
@@ -116,6 +121,59 @@ export const ValidationWorkflowBar: React.FC<ValidationWorkflowBarProps> = ({
         </div>
       )}
 
+      {/* Hierarchy Violation Alert Banner */}
+      {summary.ruleStats.ruleHierarchyViolation > 0 && (
+        <div className="bg-amber-50/80 border border-amber-300 rounded-lg p-3 text-xs text-amber-950 flex items-center justify-between gap-3 animate-fade-in">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+            <span>
+              <strong>Hierarchy Violation Terdeteksi:</strong> Terdapat <strong className="font-mono text-amber-950 font-bold">{summary.ruleStats.ruleHierarchyViolation} baris</strong> di mana Kolom A tidak diawali oleh Superior FL (Kolom D) dengan pemisah '-'. Gunakan perbaikan otomatis untuk menyinkronkan Kolom D.
+            </span>
+          </div>
+          <span className="text-[11px] font-mono text-amber-900 bg-amber-100 px-2 py-0.5 rounded font-bold border border-amber-300 shrink-0">
+            {summary.ruleStats.ruleHierarchyViolation} Hierarchy Issue
+          </span>
+        </div>
+      )}
+
+      {/* Active Module & Fuzzy Reference Toolbar Strip */}
+      <div className="bg-slate-900 text-white rounded-lg p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-md bg-blue-500/20 text-blue-400 border border-blue-400/30 flex items-center justify-center shrink-0">
+            <Layers className="w-4 h-4" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-white tracking-wide">
+                Modul Aktif: {config.name}
+              </span>
+              <span className="px-1.5 py-0.2 rounded text-[10px] font-mono bg-blue-500/30 text-blue-300 border border-blue-400/30 font-bold">
+                {config.code}
+              </span>
+            </div>
+            <div className="text-[11px] text-slate-300 mt-0.5 flex flex-wrap items-center gap-x-2">
+              <span>Format FL: <code className="font-mono text-white">{config.flFormatSample}</code></span>
+              <span>·</span>
+              <span>Superior FL: <code className="font-mono text-white">{config.superiorFormatSample}</code></span>
+              <span>·</span>
+              <span>Referensi: <strong className="text-slate-100">{config.referenceSource}</strong></span>
+            </div>
+          </div>
+        </div>
+
+        {/* Dedicated "Fuzzy Matching Referensi" Button */}
+        {onOpenFuzzyModal && (
+          <button
+            onClick={onOpenFuzzyModal}
+            className="px-3.5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-md font-bold text-xs transition-colors flex items-center gap-2 shrink-0 shadow-xs cursor-pointer self-start sm:self-center"
+            title="Deteksi perbedaan penulisan nama kota dengan database referensi aktif (SNI / LOV)"
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>Fuzzy Matching Referensi</span>
+          </button>
+        )}
+      </div>
+
       {/* Fuzzy Typo Matching Banner (if typos detected) */}
       {typoCityCount > 0 && (
         <div className="bg-amber-50 border border-amber-300 rounded-lg p-3 text-xs text-amber-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-fade-in">
@@ -126,19 +184,29 @@ export const ValidationWorkflowBar: React.FC<ValidationWorkflowBarProps> = ({
                 <strong>Fuzzy Matching Aktif:</strong> Terdeteksi <strong className="font-mono text-amber-900 font-bold">{typoCityCount} baris</strong> typo penulisan nama kota di Kolom AB.
               </span>
               <span className="text-slate-600 ml-1">
-                Algoritma Bigram & Levenshtein telah mencocokkan saran nama resmi dari LOV 111 kota.
+                Algoritma Bigram & Levenshtein telah mencocokkan saran nama resmi dari {config.referenceSource}.
               </span>
             </div>
           </div>
-          {onFixAllTypos && (
-            <button
-              onClick={onFixAllTypos}
-              className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded font-bold text-xs transition-colors flex items-center gap-1.5 shrink-0 shadow-2xs cursor-pointer"
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>Perbaiki Semua Typo ({typoCityCount})</span>
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {onOpenFuzzyModal && (
+              <button
+                onClick={onOpenFuzzyModal}
+                className="px-2.5 py-1.5 bg-white border border-amber-300 text-amber-900 hover:bg-amber-100 rounded font-semibold text-xs transition-colors flex items-center gap-1 cursor-pointer"
+              >
+                <span>Lihat Perbedaan</span>
+              </button>
+            )}
+            {onFixAllTypos && (
+              <button
+                onClick={onFixAllTypos}
+                className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded font-bold text-xs transition-colors flex items-center gap-1.5 shrink-0 shadow-2xs cursor-pointer"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Perbaiki Semua Typo ({typoCityCount})</span>
+              </button>
+            )}
+          </div>
         </div>
       )}
 
@@ -150,13 +218,13 @@ export const ValidationWorkflowBar: React.FC<ValidationWorkflowBarProps> = ({
               Alur Validasi & Perbaikan Master Data
             </h2>
             <p className="text-xs text-slate-500 mt-0.5">
-              Jalankan Tombol 1 untuk menyinkronkan data wilayah dari LOV, kemudian jalankan Tombol 2 untuk mencocokkan kode dengan Primary Key Kolom A.
+              Jalankan Tombol 1 untuk menyinkronkan data wilayah dari referensi {config.shortName}, kemudian jalankan Tombol 2 untuk mencocokkan kode dengan Primary Key Kolom A.
             </p>
           </div>
           <div className="hidden sm:flex items-center gap-2 text-xs text-slate-500">
-            <span>Standar Blueprint: <strong>ZFS04</strong></span>
+            <span>Standar Blueprint: <strong>{config.code}</strong></span>
             <span>·</span>
-            <span>Referensi: <strong>111 Kota</strong></span>
+            <span>Referensi: <strong>{config.totalReferenceCount} Entri</strong></span>
           </div>
         </div>
 
@@ -182,7 +250,7 @@ export const ValidationWorkflowBar: React.FC<ValidationWorkflowBarProps> = ({
                   Validate Plan Section
                 </h3>
                 <p className="text-xs text-slate-600 mt-1 leading-relaxed">
-                  Generate City ID dari <strong>Kolom AB (City Name)</strong> ke <strong>Kolom baru AH</strong>, lalu otomatis isi <strong>Plan Section (H)</strong>, <strong>Plant (F & I)</strong>, <strong>Work Center (J)</strong>, <strong>Cost Center (K)</strong>, dan <strong>Country (AE)</strong> = ID.
+                  Generate City ID dari <strong>Kolom AB (City Name)</strong> ke <strong>Kolom baru AH</strong> menggunakan master {config.referenceSource}, lalu otomatis sinkronkan <strong>Plan Section (H)</strong>, <strong>Plant (F & I)</strong>, <strong>Work Center (J)</strong>, <strong>Cost Center (K)</strong>, dan <strong>Country (AE)</strong> = ID.
                 </p>
               </div>
             </div>
@@ -222,14 +290,14 @@ export const ValidationWorkflowBar: React.FC<ValidationWorkflowBarProps> = ({
                   Validate FL 3-Digit vs Plan Section
                 </h3>
                 <p className="text-xs text-slate-600 mt-1 leading-relaxed">
-                  Cek apakah 3 karakter pada posisi <strong>digit 6-8 Kolom A (FL)</strong> sudah sama persis dengan <strong>Kolom H (Plan Section)</strong>. Jika ada selisih, Kolom H disamakan dengan Kolom A tanpa mengubah Kolom A.
+                  Cek apakah 3 karakter pada posisi <strong>digit 6-8 Kolom A (FL)</strong> sudah sama persis dengan <strong>Kolom H (Plan Section)</strong>. Jika ada selisih, Kolom H disamakan dengan Kolom A serta Superior FL (Kolom D) disinkronkan ke {config.superiorFormatSample} tanpa mengubah Kolom A.
                 </p>
               </div>
             </div>
 
             <div className="pt-4 mt-2 border-t border-slate-200/80 flex items-center justify-between gap-2">
               <span className="text-[11px] text-slate-500">
-                Cocokkan Kolom H dengan Kolom A
+                Cocokkan Kolom H & D dengan Kolom A
               </span>
               <button
                 onClick={onValidateFLVsPlantSection}

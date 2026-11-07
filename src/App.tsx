@@ -7,7 +7,8 @@ import { LovDatabaseModal } from './components/LovDatabaseModal';
 import { HierarchyDocModal } from './components/HierarchyDocModal';
 import { UploadModal } from './components/UploadModal';
 import { ExportModal } from './components/ExportModal';
-import { FLRowRecord } from './types/flTypes';
+import { ReferenceFuzzyModal } from './components/ReferenceFuzzyModal';
+import { FLRowRecord, FunclocModule, MODULE_CONFIGS, FLRowData } from './types/flTypes';
 import { getSampleRecords } from './data/sampleDataset';
 import { validateAllRows, validateFLRow, extractDigit6to8 } from './services/validationService';
 import { 
@@ -25,26 +26,27 @@ import { exportToDelimitedCSV, exportErrorReportCSV } from './services/csvServic
 import { 
   Search, 
   CheckCircle2, 
-  FileSpreadsheet,
-  AlertCircle,
   Download
 } from 'lucide-react';
 
 export default function App() {
-  const [records, setRecords] = useState<FLRowRecord[]>(() => getSampleRecords());
+  // Current active structure module: ZFS01 (NonBroadband) or ZFS04 (OSP/Broadband)
+  const [currentModule, setCurrentModule] = useState<FunclocModule>('ZFS01');
+  const [records, setRecords] = useState<FLRowRecord[]>(() => getSampleRecords('ZFS01'));
   const [activeTab, setActiveTab] = useState<'validator' | 'scanning' | 'lov' | 'docs'>('validator');
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+  const [isFuzzyModalOpen, setIsFuzzyModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'ERROR' | 'DUPLICATE' | 'VALID' | 'REPAIRED'>('ALL');
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'info' | 'warning' } | null>(null);
 
-  // Compute live validation summary
+  // Compute live validation summary for the active module
   const { summary } = useMemo(() => {
-    return validateAllRows(records);
-  }, [records]);
+    return validateAllRows(records, currentModule);
+  }, [records, currentModule]);
 
-  // Counts for the 2 main buttons
+  // Counts for the 2 main workflow buttons
   const missingCityIdCount = useMemo(() => {
     return records.filter(r => !r.data.cityIdGenerated || r.data.plantSection !== r.data.cityIdGenerated).length;
   }, [records]);
@@ -69,11 +71,36 @@ export default function App() {
     }, 4500);
   };
 
+  // Module switch handler
+  const handleChangeModule = (newModule: FunclocModule) => {
+    if (newModule === currentModule) return;
+    setCurrentModule(newModule);
+
+    // Revalidate current records under new module rules
+    const revalidated = records.map(r => 
+      validateFLRow(r.data, r.rowIndex, r.id, r.originalData, newModule)
+    );
+    const { records: finalRecords } = validateAllRows(revalidated, newModule);
+    setRecords(finalRecords);
+
+    showToast(
+      `Beralih ke Modul ${MODULE_CONFIGS[newModule].code} (${MODULE_CONFIGS[newModule].name}). Data telah divalidasi ulang.`,
+      'info'
+    );
+  };
+
+  // Load sample dataset for active module
+  const handleLoadSample = () => {
+    const samples = getSampleRecords(currentModule);
+    setRecords(samples);
+    showToast(`Data sampel migrasi ${MODULE_CONFIGS[currentModule].code} berhasil dimuat.`);
+  };
+
   // FUZZY TYPO FIX: Single Row
   const handleApplyFuzzyCity = (record: FLRowRecord) => {
     const oldCity = record.data.city;
     const targetCity = record.fuzzyCitySuggestion?.cityHomepass || '';
-    const { updatedRecord, changesMade } = applyFuzzyCitySuggestion(record);
+    const { updatedRecord } = applyFuzzyCitySuggestion(record, currentModule);
     setRecords(prev => prev.map(r => r.id === record.id ? updatedRecord : r));
     showToast(
       `Typo diperbaiki: '${oldCity}' -> '${targetCity}' (City ID ${updatedRecord.data.cityIdGenerated} terisi & hierarki sinkron).`,
@@ -83,16 +110,65 @@ export default function App() {
 
   // FUZZY TYPO FIX: Batch All Typos
   const handleFixAllTypos = () => {
-    const { repairedRecords, totalFixedCount } = batchApplyAllFuzzyTypoSuggestions(records);
+    const { repairedRecords, totalFixedCount } = batchApplyAllFuzzyTypoSuggestions(records, currentModule);
     setRecords(repairedRecords);
     showToast(
-      `Berhasil memperbaiki ${totalFixedCount} penulisan typo nama kota dan menyinkronkan seluruh ID LOV.`,
+      `Berhasil memperbaiki ${totalFixedCount} penulisan typo nama kota dan menyinkronkan seluruh ID referensi.`,
       'success'
     );
   };
 
+  // FUZZY MODAL: Apply Single Suggestion from Modal
+  const handleApplySingleSuggestionFromModal = (
+    recordId: string, 
+    suggestion: { cityName: string; cityId: string; plant?: string }
+  ) => {
+    const target = records.find(r => r.id === recordId);
+    if (!target) return;
+
+    // Use repairPlanSectionFromCityName with updated city
+    const modifiedRecord: FLRowRecord = {
+      ...target,
+      data: {
+        ...target.data,
+        city: suggestion.cityName,
+        cityIdGenerated: suggestion.cityId
+      }
+    };
+    const { updatedRecord } = repairPlanSectionFromCityName(modifiedRecord, currentModule);
+    setRecords(prev => prev.map(r => r.id === recordId ? updatedRecord : r));
+    showToast(`Baris #${target.rowIndex}: Nama kota diperbarui menjadi '${suggestion.cityName}' [${suggestion.cityId}].`);
+  };
+
+  // FUZZY MODAL: Apply All Suggestions from Modal
+  const handleApplyAllSuggestionsFromModal = (
+    suggestions: Array<{ recordId: string; cityName: string; cityId: string; plant?: string }>
+  ) => {
+    const suggestionMap = new Map(suggestions.map(s => [s.recordId, s]));
+
+    const updated = records.map(rec => {
+      const sug = suggestionMap.get(rec.id);
+      if (!sug) return rec;
+
+      const modifiedRecord: FLRowRecord = {
+        ...rec,
+        data: {
+          ...rec.data,
+          city: sug.cityName,
+          cityIdGenerated: sug.cityId
+        }
+      };
+      const { updatedRecord } = repairPlanSectionFromCityName(modifiedRecord, currentModule);
+      return updatedRecord;
+    });
+
+    const { records: finalRecords } = validateAllRows(updated, currentModule);
+    setRecords(finalRecords);
+    showToast(`Berhasil menerapkan ${suggestions.length} saran perbaikan nama kota dan menyinkronkan data hierarki.`);
+  };
+
   // INLINE CELL EDITING: Quick Manual Edit
-  const handleUpdateCell = (record: FLRowRecord, field: keyof import('./types/flTypes').FLRowData, newValue: string) => {
+  const handleUpdateCell = (record: FLRowRecord, field: keyof FLRowData, newValue: string) => {
     if (field === 'functionalLocation') {
       showToast('Kolom A (Functional Location) adalah Primary Key dan tidak dapat diubah.', 'warning');
       return;
@@ -103,29 +179,29 @@ export default function App() {
       [field]: newValue
     };
 
-    // Re-validate single row with new data
-    const revalidated = validateFLRow(updatedData, record.rowIndex, record.id, record.originalData);
+    // Re-validate single row with new data under active module
+    const revalidated = validateFLRow(updatedData, record.rowIndex, record.id, record.originalData, currentModule);
     setRecords(prev => prev.map(r => r.id === record.id ? revalidated : r));
     showToast(`Baris #${record.rowIndex}: Nilai Kolom ${field} berhasil diperbarui.`);
   };
 
   // BUTTON 1: Validate Plan Section
   const handleValidatePlanSection = () => {
-    const { repairedRecords, totalRepairedCount, totalChanges } = batchRepairPlanSection(records);
+    const { repairedRecords, totalRepairedCount, totalChanges } = batchRepairPlanSection(records, currentModule);
     setRecords(repairedRecords);
     if (totalRepairedCount > 0) {
       showToast(
-        `Sukses Validasi 1: ${totalRepairedCount} baris diperbarui (${totalChanges} kolom: City ID AH, Plan Section H, Plant F/I, WC J, CC K disinkronkan).`,
+        `Sukses Validasi 1 (${MODULE_CONFIGS[currentModule].code}): ${totalRepairedCount} baris diperbarui (${totalChanges} kolom: City ID AH, Plan Section H, Plant F/I, WC J, CC K disinkronkan).`,
         'success'
       );
     } else {
-      showToast('Seluruh Plan Section, Plant, Work Center, dan Cost Center sudah sesuai dengan City ID LOV.', 'info');
+      showToast(`Seluruh Plan Section, Plant, Work Center, dan Cost Center sudah sesuai dengan referensi ${MODULE_CONFIGS[currentModule].shortName}.`, 'info');
     }
   };
 
   // BUTTON 2: Validate FL 3-Digit vs Plant Section
   const handleValidateFLVsPlantSection = () => {
-    const { repairedRecords, totalRepairedCount, mismatchCountBefore } = batchSyncFLVsPlantSection(records);
+    const { repairedRecords, totalRepairedCount, mismatchCountBefore } = batchSyncFLVsPlantSection(records, currentModule);
     if (mismatchCountBefore === 0) {
       showToast('Pemeriksaan selesai: Semua 3-digit Plant Section (Kolom H) SUDAH SAMA dengan 3-digit Kolom A.', 'success');
       return;
@@ -133,25 +209,25 @@ export default function App() {
 
     setRecords(repairedRecords);
     showToast(
-      `Ditemukan ${mismatchCountBefore} baris selisih: Kolom Plant Section (H) telah disinkronkan mengikuti 3-digit Kolom A.`,
+      `Ditemukan ${mismatchCountBefore} baris selisih: Kolom Plant Section (H) & Superior FL (D) telah disinkronkan mengikuti Kolom A (${MODULE_CONFIGS[currentModule].code}).`,
       'warning'
     );
   };
 
   // Single Row: Sync Plan Section from City Name
   const handleSyncPlanSectionRow = (record: FLRowRecord) => {
-    const { updatedRecord, changesMade } = repairPlanSectionFromCityName(record);
+    const { updatedRecord, changesMade } = repairPlanSectionFromCityName(record, currentModule);
     setRecords(prev => prev.map(r => r.id === record.id ? updatedRecord : r));
     if (changesMade.length > 0) {
-      showToast(`Baris #${record.rowIndex}: Berhasil disinkronkan dengan referensi LOV.`);
+      showToast(`Baris #${record.rowIndex}: Berhasil disinkronkan dengan referensi ${MODULE_CONFIGS[currentModule].shortName}.`);
     } else {
-      showToast(`Baris #${record.rowIndex}: Sudah sesuai dengan LOV.`, 'info');
+      showToast(`Baris #${record.rowIndex}: Sudah sesuai dengan referensi.`, 'info');
     }
   };
 
   // Single Row: Sync Plant Section with FL 3-digit
   const handleSyncFLDigitRow = (record: FLRowRecord) => {
-    const { updatedRecord, changesMade } = syncPlantSectionWithFLCode(record);
+    const { updatedRecord, changesMade } = syncPlantSectionWithFLCode(record, currentModule);
     setRecords(prev => prev.map(r => r.id === record.id ? updatedRecord : r));
     const flDigit = extractDigit6to8(record.data.functionalLocation);
     if (changesMade.length > 0) {
@@ -163,48 +239,37 @@ export default function App() {
 
   // Repair single row
   const handleRepairRow = (record: FLRowRecord) => {
-    const { updatedRecord, changesMade } = autoRepairRow(record);
+    const { updatedRecord, changesMade } = autoRepairRow(record, currentModule);
     setRecords(prev => prev.map(r => r.id === record.id ? updatedRecord : r));
     showToast(`Baris #${record.rowIndex} berhasil diperbaiki (${changesMade.length} kolom disinkronkan).`);
   };
 
   // Repair all rows
   const handleRepairAll = () => {
-    const { repairedRecords, totalRepairedCount, totalChanges } = autoRepairAll(records);
+    const { repairedRecords, totalRepairedCount, totalChanges } = autoRepairAll(records, currentModule);
     setRecords(repairedRecords);
     showToast(`Berhasil memperbaiki ${totalRepairedCount} baris data (${totalChanges} perubahan diterapkan).`);
   };
 
   // Reset single row
   const handleResetRow = (record: FLRowRecord) => {
-    const reset = resetRecord(record);
+    const reset = resetRecord(record, currentModule);
     setRecords(prev => prev.map(r => r.id === record.id ? reset : r));
     showToast(`Baris #${record.rowIndex} dikembalikan ke data awal.`, 'info');
   };
 
-  // Load sample dataset
-  const handleLoadSample = () => {
-    const samples = getSampleRecords();
-    setRecords(samples);
-    showToast('Data sampel migrasi berhasil dimuat.');
-  };
-
-  // Export CSV
-  const handleExportCSV = () => {
-    exportToDelimitedCSV(records, 'Master_Data_Functional_Location_SAP.csv');
-    showToast('File CSV dengan delimiter titik koma (;) berhasil diunduh.');
-  };
-
   // Export Audit CSV
   const handleExportAuditReport = () => {
-    exportErrorReportCSV(records, 'Laporan_Audit_Validasi_FL.csv');
+    exportErrorReportCSV(records, `Laporan_Audit_Validasi_FL_${currentModule}.csv`);
     showToast('Laporan audit temuan validasi (CSV ;) berhasil diunduh.');
   };
 
   // File Upload
   const handleDataLoaded = (newRecords: FLRowRecord[]) => {
-    setRecords(newRecords);
-    showToast(`${newRecords.length} baris data berhasil diimpor dan divalidasi.`);
+    // Revalidate under current module
+    const { records: finalRecords } = validateAllRows(newRecords, currentModule);
+    setRecords(finalRecords);
+    showToast(`${newRecords.length} baris data berhasil diimpor dan divalidasi dengan modul ${MODULE_CONFIGS[currentModule].code}.`);
   };
 
   // Filter records
@@ -230,8 +295,8 @@ export default function App() {
   }, [records, statusFilter, searchQuery]);
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-900 antialiased selection:bg-slate-200">
-      {/* Header with Navigation Bar */}
+    <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-900 antialiased selection:bg-slate-200 w-full max-w-full overflow-x-hidden">
+      {/* Header with Navigation Bar & Module Switcher */}
       <Header
         activeTab={activeTab}
         setActiveTab={setActiveTab}
@@ -240,10 +305,13 @@ export default function App() {
         onLoadSample={handleLoadSample}
         hasData={records.length > 0}
         totalErrors={summary.errorRows}
+        currentModule={currentModule}
+        onChangeModule={handleChangeModule}
+        onOpenFuzzyModal={() => setIsFuzzyModalOpen(true)}
       />
 
       {/* Main Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-4 lg:px-6 py-6 space-y-6 min-w-0">
         {/* Toast Notification */}
         {toastMessage && (
           <div className="fixed bottom-6 right-6 z-50 animate-fade-in shadow-xl">
@@ -263,7 +331,7 @@ export default function App() {
         {/* Tab 1: Lembar Kerja Validasi */}
         {activeTab === 'validator' && (
           <div className="space-y-4">
-            {/* Structured Workflow Bar with 2 Clear Buttons */}
+            {/* Structured Workflow Bar with 2 Clear Buttons, Module Info, and Fuzzy Matching Button */}
             <ValidationWorkflowBar
               summary={summary}
               onValidatePlanSection={handleValidatePlanSection}
@@ -273,6 +341,8 @@ export default function App() {
               typoCityCount={typoCityCount}
               onFixAllTypos={handleFixAllTypos}
               onOpenExportModal={() => setIsExportModalOpen(true)}
+              module={currentModule}
+              onOpenFuzzyModal={() => setIsFuzzyModalOpen(true)}
             />
 
             {/* Clean Data Grid Toolbar */}
@@ -337,7 +407,7 @@ export default function App() {
                 </button>
               </div>
 
-              {/* Search & Audit Log */}
+              {/* Search & Export Buttons */}
               <div className="flex items-center gap-2">
                 <div className="relative">
                   <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
@@ -352,19 +422,19 @@ export default function App() {
 
                 <button
                   onClick={() => setIsExportModalOpen(true)}
-                  className="px-2.5 py-1.5 text-xs text-slate-700 hover:text-slate-900 bg-white border border-slate-300 rounded-md transition-colors whitespace-nowrap flex items-center gap-1.5 font-medium cursor-pointer"
+                  className="px-2.5 py-1.5 text-xs text-slate-700 hover:text-slate-900 bg-white border border-slate-300 rounded-md transition-colors whitespace-nowrap flex items-center gap-1.5 font-medium cursor-pointer shrink-0 shadow-2xs"
                   title="Buka pilihan ekspor terpisah (Data Bersih, Data Bermasalah, Semua Data, Laporan Audit)"
                 >
                   <Download className="w-3.5 h-3.5 text-slate-500" />
-                  <span>Opsi Ekspor (;)</span>
+                  <span>Ekspor (;)</span>
                 </button>
 
                 <button
                   onClick={handleExportAuditReport}
-                  className="px-2.5 py-1.5 text-xs text-slate-600 hover:text-slate-900 bg-white border border-slate-300 rounded-md transition-colors whitespace-nowrap cursor-pointer"
+                  className="px-2.5 py-1.5 text-xs text-slate-600 hover:text-slate-900 bg-white border border-slate-300 rounded-md transition-colors whitespace-nowrap cursor-pointer shrink-0"
                   title="Unduh rekapan temuan audit CSV (;)"
                 >
-                  Unduh Log Audit (;)
+                  Log Audit (;)
                 </button>
               </div>
             </div>
@@ -395,9 +465,9 @@ export default function App() {
           />
         )}
 
-        {/* Tab 3: Referensi LOV 111 Kota */}
+        {/* Tab 3: Referensi Database (SNI 424 & LOV 111) */}
         {activeTab === 'lov' && (
-          <LovDatabaseModal />
+          <LovDatabaseModal initialModule={currentModule} />
         )}
 
         {/* Tab 4: Panduan Struktur */}
@@ -405,6 +475,16 @@ export default function App() {
           <HierarchyDocModal />
         )}
       </main>
+
+      {/* Fuzzy Matching Reference Discrepancy Modal */}
+      <ReferenceFuzzyModal
+        isOpen={isFuzzyModalOpen}
+        onClose={() => setIsFuzzyModalOpen(false)}
+        records={records}
+        module={currentModule}
+        onApplySingleSuggestion={handleApplySingleSuggestionFromModal}
+        onApplyAllSuggestions={handleApplyAllSuggestionsFromModal}
+      />
 
       {/* Upload & Import Modal */}
       <UploadModal

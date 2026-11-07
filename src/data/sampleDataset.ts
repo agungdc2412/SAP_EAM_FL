@@ -478,11 +478,413 @@ export const SAMPLE_RAW_DATA: FLRowData[] = [
   }
 ];
 
-export function getSampleRecords(): FLRowRecord[] {
-  const initialRecords = SAMPLE_RAW_DATA.map((row, idx) => {
-    return validateFLRow(row, idx + 1, `sample_row_${idx + 1}`);
+export const SAMPLE_ZFS04_DATA = SAMPLE_RAW_DATA;
+
+export const SAMPLE_ZFS01_DATA: FLRowData[] = [
+  // 1. Row 1: Valid ZFS01 Solok (matches blueprint image_0e8da4e1.png)
+  {
+    functionalLocation: '1011-ARS-000000001', // PK IMMUTABLE
+    structureIndicator: 'ZFS01',
+    description: '[11194] KCP Alahan Panjang',
+    superiorFunctLoc: '1011-ARS', // Level 2: Plant-CityID
+    startupDate: '2026-07-05',
+    planningPlant: '1011',
+    location: '',
+    plantSection: 'ARS',
+    maintPlant: '1011',
+    workCenter: '1011FOP1',
+    costCenter: '101OP02',
+    sortField: 'P1900044',
+    inventoryNo: 'CRT2606026552',
+    latLong: '-0.982145,100.612034',
+    title: '',
+    name1: 'Bank Mandiri KCP Alahan Panjang',
+    name2: '',
+    street5: '',
+    street: 'Jl. Gajah Mada No. 5Solok,SumBarIDN',
+    street3: '[11194] KCP Alahan Panjang',
+    houseNumber: '5',
+    houseNumberSupplement: '',
+    floor: '1',
+    street2: '',
+    street4: '1011-ARS-STRBANKMA-01',
+    otherCity: 'ALAHAN PANJANG',
+    district: 'LEMBAH GUMANTI',
+    city: 'KABUPATEN SOLOK',
+    postalCode: '27371',
+    region: '',
+    country: 'ID',
+    telephone: '',
+    telephoneExtension: '',
+    cityIdGenerated: 'ARS',
+    status: 'Active'
+  },
+
+  // 2. Row 2: Col AH is EMPTY and Col H, F, I, J, K not yet synced
+  // Test target for Button 1: "Validate Plan Section" with SNI Database
+  {
+    functionalLocation: '1011-PAD-000000002', // PK IMMUTABLE
+    structureIndicator: 'ZFS01',
+    description: '[11200] Kantor Cabang Padang Kota',
+    superiorFunctLoc: '1011-PAD',
+    startupDate: '2026-07-10',
+    planningPlant: '', // Kosong -> disinkron jadi 1011
+    location: '',
+    plantSection: '',  // Kosong -> disinkron jadi PAD
+    maintPlant: '',     // Kosong -> disinkron jadi 1011
+    workCenter: '',     // Kosong -> disinkron jadi 1011FOP1
+    costCenter: '',     // Kosong -> disinkron jadi 101OP02
+    sortField: 'P1900055',
+    inventoryNo: 'CRT2606026881',
+    latLong: '-0.947083,100.417181',
+    title: '',
+    name1: 'PT Telekomunikasi Indonesia Padang',
+    name2: '',
+    street5: '',
+    street: 'Jl. Khatib Sulaiman No. 12',
+    street3: '',
+    houseNumber: '12',
+    houseNumberSupplement: '',
+    floor: '2',
+    street2: 'RT 01 RW 04',
+    street4: '1011-PAD-STRPADKOT-01',
+    otherCity: 'LOLONG BELANTI',
+    district: 'PADANG UTARA',
+    city: 'KOTA PADANG',
+    postalCode: '25136',
+    region: '',
+    country: 'ID',
+    telephone: '',
+    telephoneExtension: '',
+    cityIdGenerated: '', // <-- Kosong! Target generate ke Kolom AH (PAD) via SNI
+    status: 'Active'
+  },
+
+  // 3. Row 3: Digit 6-8 FL Code vs Plan Section (H) MISMATCH
+  // FL has 'BDG' at digit 6-8, but Plan Section is 'CBI'
+  // Test target for Button 2: "Validate FL vs Plant Section" -> updates Col H to BDG
+  {
+    functionalLocation: '2041-BDG-000000003', // PK IMMUTABLE
+    structureIndicator: 'ZFS01',
+    description: '[20412] Branch Office Bandung Dago',
+    superiorFunctLoc: '2041-BDG',
+    startupDate: '2026-07-15',
+    planningPlant: '2041',
+    location: '',
+    plantSection: 'CBI', // <-- MISMATCH! FL digit 6-8 is BDG, but Col H is CBI
+    maintPlant: '2041',
+    workCenter: '2041FOP1',
+    costCenter: '204OP02',
+    sortField: 'P1900078',
+    inventoryNo: 'CRT2606027110',
+    latLong: '-6.903890,107.618610',
+    title: '',
+    name1: 'Dago Digital Hub Center',
+    name2: '',
+    street5: '',
+    street: 'Jl. Ir. H. Juanda No. 100',
+    street3: '',
+    houseNumber: '100',
+    houseNumberSupplement: '',
+    floor: '1',
+    street2: '',
+    street4: '2041-BDG-STRDAGOHUB-01',
+    otherCity: 'LEBAKGEDE',
+    district: 'COBLONG',
+    city: 'KOTA BANDUNG',
+    postalCode: '40132',
+    region: '',
+    country: 'ID',
+    telephone: '',
+    telephoneExtension: '',
+    cityIdGenerated: 'BDG',
+    status: 'Active'
+  },
+
+  // 4. Row 4: Superior FL (D) MISMATCH / Hierarchy Violation
+  // FL is 2031-SMG-000000004 but Superior FL is 1011-ARS (Beda Plant & City!)
+  // Auto-repair fixes Col D to 2031-SMG, preserving Col A primary key
+  {
+    functionalLocation: '2031-SMG-000000004', // PK IMMUTABLE
+    structureIndicator: 'ZFS01',
+    description: '[20315] Node Semarang Pahlawan',
+    superiorFunctLoc: '1011-ARS', // <-- MISMATCH & HIERARCHY VIOLATION! Harusnya 2031-SMG
+    startupDate: '2026-07-20',
+    planningPlant: '2031',
+    location: '',
+    plantSection: 'SMG',
+    maintPlant: '2031',
+    workCenter: '2031FOP1',
+    costCenter: '203OP02',
+    sortField: 'P1900089',
+    inventoryNo: 'CRT2606027450',
+    latLong: '-6.992812,110.421543',
+    title: '',
+    name1: 'Gedung Telkom Simpang Lima',
+    name2: '',
+    street5: '',
+    street: 'Jl. Pahlawan No. 1',
+    street3: '',
+    houseNumber: '1',
+    houseNumberSupplement: '',
+    floor: '3',
+    street2: '',
+    street4: '2031-SMG-STRSMPLMA-01',
+    otherCity: 'MUGASSARI',
+    district: 'SEMARANG SELATAN',
+    city: 'KOTA SEMARANG',
+    postalCode: '50249',
+    region: '',
+    country: 'ID',
+    telephone: '',
+    telephoneExtension: '',
+    cityIdGenerated: 'SMG',
+    status: 'Active'
+  },
+
+  // 5. Row 5: Missing Superior FL (Col D is empty)
+  {
+    functionalLocation: '2051-SBY-000000005', // PK IMMUTABLE
+    structureIndicator: 'ZFS01',
+    description: '[20518] Point Surabaya Basuki Rahmat',
+    superiorFunctLoc: '', // <-- Kosong! Harus diisi 2051-SBY (Lev 2)
+    startupDate: '2026-07-22',
+    planningPlant: '2051',
+    location: '',
+    plantSection: 'SBY',
+    maintPlant: '2051',
+    workCenter: '2051FOP2',
+    costCenter: '205OP02',
+    sortField: 'P1900101',
+    inventoryNo: 'CRT2606027890',
+    latLong: '-7.265140,112.742300',
+    title: '',
+    name1: 'Intiland Tower Surabaya',
+    name2: '',
+    street5: '',
+    street: 'Jl. Panglima Sudirman No. 101',
+    street3: '',
+    houseNumber: '101',
+    houseNumberSupplement: '',
+    floor: '5',
+    street2: '',
+    street4: '2051-SBY-STRINTLND-01',
+    otherCity: 'EMBONG KALIASIN',
+    district: 'GENTENG',
+    city: 'KOTA SURABAYA',
+    postalCode: '60271',
+    region: '',
+    country: 'ID',
+    telephone: '',
+    telephoneExtension: '',
+    cityIdGenerated: 'SBY',
+    status: 'Active'
+  },
+
+  // 6. Row 6: Outdated Plan Section, WC, CC vs City Name
+  {
+    functionalLocation: '3061-DPS-000000006', // PK IMMUTABLE
+    structureIndicator: 'ZFS01',
+    description: '[30611] Gateway Bali Renon',
+    superiorFunctLoc: '3061-DPS',
+    startupDate: '2026-07-25',
+    planningPlant: '1011', // Outdated -> Harusnya 3061
+    location: '',
+    plantSection: 'SDA', // Outdated -> Harusnya DPS
+    maintPlant: '1011',    // Outdated -> Harusnya 3061
+    workCenter: '1011FOP1', // Outdated -> Harusnya 3061FOP
+    costCenter: '101OP02',  // Outdated -> Harusnya 306OP02
+    sortField: 'P1900115',
+    inventoryNo: 'CRT2606028120',
+    latLong: '-8.674120,115.234510',
+    title: '',
+    name1: 'Regional Office Renon',
+    name2: '',
+    street5: '',
+    street: 'Jl. Raya Puputan No. 28',
+    street3: '',
+    houseNumber: '28',
+    houseNumberSupplement: '',
+    floor: '1',
+    street2: '',
+    street4: '3061-DPS-STRRENNON-01',
+    otherCity: 'RENON',
+    district: 'DENPASAR SELATAN',
+    city: 'KOTA DENPASAR',
+    postalCode: '80239',
+    region: '',
+    country: 'ID',
+    telephone: '',
+    telephoneExtension: '',
+    cityIdGenerated: '', // Kosong -> disinkron DPS
+    status: 'Active'
+  },
+
+  // 7. Row 7: Typo City Name "KAB SOLOK" (SNI Fuzzy Match -> KABUPATEN SOLOK / ARS) + Inverted Coordinates
+  {
+    functionalLocation: '1011-ARS-000000007', // PK IMMUTABLE
+    structureIndicator: 'ZFS01',
+    description: '[11198] Unit Pelayanan Talang',
+    superiorFunctLoc: '1011-ARS',
+    startupDate: '2026-08-01',
+    planningPlant: '1011',
+    location: '',
+    plantSection: 'ARS',
+    maintPlant: '1011',
+    workCenter: '1011FOP1',
+    costCenter: '101OP02',
+    sortField: 'P1900122',
+    inventoryNo: 'CRT2606028440',
+    latLong: '100.612034,-0.982145', // <-- KOORDINAT TERBALIK! (Long dulu baru Lat)
+    title: '',
+    name1: 'Puskesmas Talang Babungo',
+    name2: '',
+    street5: '',
+    street: 'Jl. Raya Solok - Alahan Panjang Km 18',
+    street3: '',
+    houseNumber: '18',
+    houseNumberSupplement: '',
+    floor: '',
+    street2: '',
+    street4: '1011-ARS-STRTLNG01-01',
+    otherCity: 'TALANG',
+    district: 'GUNUNG TALANG',
+    city: 'KAB SOLOK', // <-- TYPO SNI! Kurang kata "UPATEN"
+    postalCode: '27365',
+    region: '',
+    country: 'ID',
+    telephone: '',
+    telephoneExtension: '',
+    cityIdGenerated: '',
+    status: 'Active'
+  },
+
+  // 8. Row 8: Typo Inverted "BEKASI KOTA" (SNI Fuzzy Match -> KOTA BEKASI / BKS) + Semicolon Coordinates
+  {
+    functionalLocation: '4091-BKS-000000008', // PK IMMUTABLE
+    structureIndicator: 'ZFS01',
+    description: '[40915] Datacenter Summarecon Bekasi',
+    superiorFunctLoc: '4091-BKS',
+    startupDate: '2026-08-05',
+    planningPlant: '4091',
+    location: '',
+    plantSection: 'BKS',
+    maintPlant: '4091',
+    workCenter: '4091FOP3',
+    costCenter: '409OP02',
+    sortField: 'P1900140',
+    inventoryNo: 'CRT2606028890',
+    latLong: '-6.224150; 106.998230', // <-- Pemisah titik koma dan spasi tidak standar
+    title: '',
+    name1: 'Summarecon Mall Bekasi POP',
+    name2: '',
+    street5: '',
+    street: 'Jl. Bulevar Ahmad Yani Blok M',
+    street3: '',
+    houseNumber: 'Blok M',
+    houseNumberSupplement: '',
+    floor: '2',
+    street2: '',
+    street4: '4091-BKS-STRSUMMBK-01',
+    otherCity: 'MARGA MULYA',
+    district: 'BEKASI UTARA',
+    city: 'BEKASI KOTA', // <-- TYPO SNI! Susunan kata terbalik
+    postalCode: '17142',
+    region: '',
+    country: 'ID',
+    telephone: '',
+    telephoneExtension: '',
+    cityIdGenerated: '',
+    status: 'Active'
+  },
+
+  // 9. Row 9: DUPLICATE PRIMARY KEY (Sama persis dengan Baris #1)
+  {
+    functionalLocation: '1011-ARS-000000001', // <-- DUPLIKAT PK ROW 1!
+    structureIndicator: 'ZFS01',
+    description: '[11194] KCP Alahan Panjang (DUPLIKAT)',
+    superiorFunctLoc: '1011-ARS',
+    startupDate: '2026-07-05',
+    planningPlant: '1011',
+    location: '',
+    plantSection: 'ARS',
+    maintPlant: '1011',
+    workCenter: '1011FOP1',
+    costCenter: '101OP02',
+    sortField: 'P1900044',
+    inventoryNo: 'CRT2606026552',
+    latLong: '-0.982145,100.612034',
+    title: '',
+    name1: 'Bank Mandiri KCP Alahan Panjang (Ganda)',
+    name2: '',
+    street5: '',
+    street: 'Jl. Gajah Mada No. 5Solok',
+    street3: '',
+    houseNumber: '5',
+    houseNumberSupplement: '',
+    floor: '1',
+    street2: '',
+    street4: '1011-ARS-STRBANKMA-01',
+    otherCity: 'ALAHAN PANJANG',
+    district: 'LEMBAH GUMANTI',
+    city: 'KABUPATEN SOLOK',
+    postalCode: '27371',
+    region: '',
+    country: 'ID',
+    telephone: '',
+    telephoneExtension: '',
+    cityIdGenerated: 'ARS',
+    status: 'Active'
+  },
+
+  // 10. Row 10: Wrong Structure Indicator (ZFS04 on ZFS01 module) & Missing Country
+  {
+    functionalLocation: '3081-MKS-000000010', // PK IMMUTABLE
+    structureIndicator: 'ZFS04', // <-- Struktur salah! Modul ini ZFS01
+    description: '[30812] POP Makassar Ratulangi',
+    superiorFunctLoc: '3081-MKS',
+    startupDate: '2026-08-10',
+    planningPlant: '3081',
+    location: '',
+    plantSection: 'MKS',
+    maintPlant: '3081',
+    workCenter: '3081FOP',
+    costCenter: '308OP02',
+    sortField: 'P1900155',
+    inventoryNo: 'CRT2606029110',
+    latLong: '-5.152890,119.414320',
+    title: '',
+    name1: 'Ratulangi Point of Presence',
+    name2: '',
+    street5: '',
+    street: 'Jl. Dr. Sam Ratulangi No. 45',
+    street3: '',
+    houseNumber: '45',
+    houseNumberSupplement: '',
+    floor: '1',
+    street2: '',
+    street4: '3081-MKS-STRRATUL-01',
+    otherCity: 'MAMAJANG LUAR',
+    district: 'MAMAJANG',
+    city: 'KOTA MAKASSAR',
+    postalCode: '90132',
+    region: '',
+    country: '', // <-- Kosong! Harus ID
+    telephone: '',
+    telephoneExtension: '',
+    cityIdGenerated: 'MKS',
+    status: 'Active'
+  }
+];
+
+import { FunclocModule } from '../types/flTypes';
+
+export function getSampleRecords(module: FunclocModule = 'ZFS04'): FLRowRecord[] {
+  const dataset = module === 'ZFS01' ? SAMPLE_ZFS01_DATA : SAMPLE_ZFS04_DATA;
+  const initialRecords = dataset.map((row, idx) => {
+    return validateFLRow(row, idx + 1, `${module.toLowerCase()}_sample_row_${idx + 1}`, undefined, module);
   });
-  // Use validateAllRows so duplicate detection runs on initial data
-  const { records } = validateAllRows(initialRecords);
+  // Use validateAllRows so duplicate detection and cross checks run on initial data
+  const { records } = validateAllRows(initialRecords, module);
   return records;
 }

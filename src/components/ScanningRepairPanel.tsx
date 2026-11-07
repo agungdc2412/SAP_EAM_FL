@@ -34,6 +34,7 @@ export const ScanningRepairPanel: React.FC<ScanningRepairPanelProps> = ({
   );
 
   const typoIssues = allIssues.filter(i => i.record.fuzzyCitySuggestion && i.issue.field === 'city');
+  const hierarchyIssues = allIssues.filter(i => i.issue.rule === 'RULE_HIERARCHY_VIOLATION');
 
   const filteredIssues = selectedRuleFilter === 'ALL'
     ? allIssues
@@ -127,13 +128,13 @@ export const ScanningRepairPanel: React.FC<ScanningRepairPanelProps> = ({
       </div>
 
       {/* Filter Tabs by Rule */}
-      <div className="flex items-center justify-between gap-2 pt-2">
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 w-full min-w-0">
+        <div className="flex-1 min-w-0 flex items-center gap-1.5 overflow-x-auto pb-1.5 text-xs">
           <button
             onClick={() => setSelectedRuleFilter('ALL')}
-            className={`px-3 py-1.5 rounded-md font-medium whitespace-nowrap transition-colors ${
+            className={`px-3 py-1.5 rounded-md font-medium whitespace-nowrap transition-colors cursor-pointer shrink-0 ${
               selectedRuleFilter === 'ALL'
-                ? 'bg-slate-900 text-white'
+                ? 'bg-slate-900 text-white shadow-2xs'
                 : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
             }`}
           >
@@ -141,10 +142,21 @@ export const ScanningRepairPanel: React.FC<ScanningRepairPanelProps> = ({
           </button>
 
           <button
+            onClick={() => setSelectedRuleFilter('RULE_HIERARCHY_VIOLATION')}
+            className={`px-3 py-1.5 rounded-md font-medium whitespace-nowrap transition-colors cursor-pointer shrink-0 ${
+              selectedRuleFilter === 'RULE_HIERARCHY_VIOLATION'
+                ? 'bg-rose-900 text-white font-bold shadow-2xs'
+                : 'bg-white border border-rose-300 text-rose-800 hover:bg-rose-50'
+            }`}
+          >
+            Hierarchy Violation ({hierarchyIssues.length})
+          </button>
+
+          <button
             onClick={() => setSelectedRuleFilter('RULE_DUPLICATE_PK')}
-            className={`px-3 py-1.5 rounded-md font-medium whitespace-nowrap transition-colors ${
+            className={`px-3 py-1.5 rounded-md font-medium whitespace-nowrap transition-colors cursor-pointer shrink-0 ${
               selectedRuleFilter === 'RULE_DUPLICATE_PK'
-                ? 'bg-rose-900 text-white'
+                ? 'bg-rose-900 text-white shadow-2xs'
                 : 'bg-white border border-rose-200 text-rose-800 hover:bg-rose-50'
             }`}
           >
@@ -154,9 +166,9 @@ export const ScanningRepairPanel: React.FC<ScanningRepairPanelProps> = ({
           {typoIssues.length > 0 && (
             <button
               onClick={() => setSelectedRuleFilter('TYPO_FUZZY')}
-              className={`px-3 py-1.5 rounded-md font-medium whitespace-nowrap transition-colors flex items-center gap-1 ${
+              className={`px-3 py-1.5 rounded-md font-medium whitespace-nowrap transition-colors flex items-center gap-1 cursor-pointer shrink-0 ${
                 selectedRuleFilter === 'TYPO_FUZZY'
-                  ? 'bg-amber-600 text-white'
+                  ? 'bg-amber-600 text-white shadow-2xs'
                   : 'bg-white border border-amber-300 text-amber-900 hover:bg-amber-50'
               }`}
             >
@@ -167,9 +179,9 @@ export const ScanningRepairPanel: React.FC<ScanningRepairPanelProps> = ({
 
           <button
             onClick={() => setSelectedRuleFilter('RULE_2_DIGIT_6_8_VS_PLAN')}
-            className={`px-3 py-1.5 rounded-md font-medium whitespace-nowrap transition-colors ${
+            className={`px-3 py-1.5 rounded-md font-medium whitespace-nowrap transition-colors cursor-pointer shrink-0 ${
               selectedRuleFilter === 'RULE_2_DIGIT_6_8_VS_PLAN'
-                ? 'bg-slate-900 text-white'
+                ? 'bg-slate-900 text-white shadow-2xs'
                 : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
             }`}
           >
@@ -178,9 +190,9 @@ export const ScanningRepairPanel: React.FC<ScanningRepairPanelProps> = ({
 
           <button
             onClick={() => setSelectedRuleFilter('RULE_3_CITY_NAME_TO_CITY_ID')}
-            className={`px-3 py-1.5 rounded-md font-medium whitespace-nowrap transition-colors ${
+            className={`px-3 py-1.5 rounded-md font-medium whitespace-nowrap transition-colors cursor-pointer shrink-0 ${
               selectedRuleFilter === 'RULE_3_CITY_NAME_TO_CITY_ID'
-                ? 'bg-slate-900 text-white'
+                ? 'bg-slate-900 text-white shadow-2xs'
                 : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
             }`}
           >
@@ -189,9 +201,9 @@ export const ScanningRepairPanel: React.FC<ScanningRepairPanelProps> = ({
 
           <button
             onClick={() => setSelectedRuleFilter('RULE_4_PLAN_SECTION_SYNC')}
-            className={`px-3 py-1.5 rounded-md font-medium whitespace-nowrap transition-colors ${
+            className={`px-3 py-1.5 rounded-md font-medium whitespace-nowrap transition-colors cursor-pointer shrink-0 ${
               selectedRuleFilter === 'RULE_4_PLAN_SECTION_SYNC'
-                ? 'bg-slate-900 text-white'
+                ? 'bg-slate-900 text-white shadow-2xs'
                 : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
             }`}
           >
@@ -200,9 +212,9 @@ export const ScanningRepairPanel: React.FC<ScanningRepairPanelProps> = ({
 
           <button
             onClick={() => setSelectedRuleFilter('RULE_1_SUPERIOR_FL')}
-            className={`px-3 py-1.5 rounded-md font-medium whitespace-nowrap transition-colors ${
+            className={`px-3 py-1.5 rounded-md font-medium whitespace-nowrap transition-colors cursor-pointer shrink-0 ${
               selectedRuleFilter === 'RULE_1_SUPERIOR_FL'
-                ? 'bg-slate-900 text-white'
+                ? 'bg-slate-900 text-white shadow-2xs'
                 : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
             }`}
           >
@@ -211,9 +223,9 @@ export const ScanningRepairPanel: React.FC<ScanningRepairPanelProps> = ({
 
           <button
             onClick={() => setSelectedRuleFilter('RULE_8_COORDINATES')}
-            className={`px-3 py-1.5 rounded-md font-medium whitespace-nowrap transition-colors ${
+            className={`px-3 py-1.5 rounded-md font-medium whitespace-nowrap transition-colors cursor-pointer shrink-0 ${
               selectedRuleFilter === 'RULE_8_COORDINATES'
-                ? 'bg-amber-700 text-white'
+                ? 'bg-amber-700 text-white shadow-2xs'
                 : 'bg-white border border-amber-200 text-amber-900 hover:bg-amber-50'
             }`}
           >
@@ -224,9 +236,9 @@ export const ScanningRepairPanel: React.FC<ScanningRepairPanelProps> = ({
         {allIssues.length > 0 && (
           <button
             onClick={onRepairAll}
-            className="px-3 py-1.5 text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white rounded transition-colors whitespace-nowrap flex items-center gap-1 shrink-0"
+            className="px-3.5 py-1.5 text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white rounded-md transition-colors whitespace-nowrap flex items-center gap-1.5 shrink-0 self-start sm:self-auto shadow-2xs cursor-pointer"
           >
-            <Wrench className="w-3 h-3" />
+            <Wrench className="w-3.5 h-3.5 text-emerald-400" />
             <span>Perbaiki Semua ({allIssues.length})</span>
           </button>
         )}

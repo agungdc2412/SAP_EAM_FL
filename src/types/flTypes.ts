@@ -2,6 +2,51 @@
  * Types and schema for Functional Location (FL) Master Data Migration
  */
 
+export type FunclocModule = 'ZFS01' | 'ZFS04';
+
+export interface ModuleConfig {
+  id: FunclocModule;
+  code: string;
+  name: string;
+  shortName: string;
+  badge: string;
+  description: string;
+  defaultStructureIndicator: string;
+  flFormatSample: string;
+  superiorFormatSample: string;
+  referenceSource: string;
+  totalReferenceCount: number;
+}
+
+export const MODULE_CONFIGS: Record<FunclocModule, ModuleConfig> = {
+  ZFS01: {
+    id: 'ZFS01',
+    code: 'ZFS01-NBB',
+    name: 'ZFS01 - NonBroadband (NBB)',
+    shortName: 'ZFS01-NBB',
+    badge: 'Non-Broadband',
+    description: 'Master Data Functional Location Non-Broadband (Format: Plant-CityID-RunningNumberID, Superior: Plant-CityID Lev 2)',
+    defaultStructureIndicator: 'ZFS01',
+    flFormatSample: '1011-ARS-000000001',
+    superiorFormatSample: '1011-ARS',
+    referenceSource: 'SNI Master Database (424 Kota/Kab)',
+    totalReferenceCount: 424
+  },
+  ZFS04: {
+    id: 'ZFS04',
+    code: 'ZFS04-OSP/BB',
+    name: 'ZFS04 - OSP/Broadband (BB)',
+    shortName: 'ZFS04-OSP/BB',
+    badge: 'OSP / Broadband',
+    description: 'Master Data Functional Location OSP / Broadband (Format: Plant-CityID-Pole-HomeID, Superior: Plant-CityID-Pole Lev 3)',
+    defaultStructureIndicator: 'ZFS04',
+    flFormatSample: '1011-LBP-T00014433-20351H000.1.01897',
+    superiorFormatSample: '1011-LBP-T00014433',
+    referenceSource: 'LOV ZFS04 (111 Kota Homepass)',
+    totalReferenceCount: 111
+  }
+};
+
 export interface FLRowData {
   // Primary SAP PM Columns
   functionalLocation: string;       // Col A (Char 40) PRIMARY KEY (IMMUTABLE)
@@ -45,6 +90,7 @@ export type Severity = 'error' | 'warning' | 'info';
 
 export type IssueRule = 
   | 'RULE_DUPLICATE_PK'           // Col A (Functional Location) Duplicate Primary Key
+  | 'RULE_HIERARCHY_VIOLATION'    // Parent-Child Hierarchy: Column A must start with Column D + '-'
   | 'RULE_1_SUPERIOR_FL'          // Col D vs Col A Lev 2 (PLANT-CITY)
   | 'RULE_2_DIGIT_6_8_VS_PLAN'    // Col A 3char (digit 6-8) vs Col H (Plan Section)
   | 'RULE_3_CITY_NAME_TO_CITY_ID' // Generate City Name (AB) to City ID (AH) via LOV
@@ -78,11 +124,13 @@ export interface FLRowRecord {
   isRepaired: boolean;
   isDuplicatePk?: boolean;
   duplicateWithRows?: number[];
+  module?: FunclocModule;
   fuzzyCitySuggestion?: {
     cityHomepass: string;
     cityId: string;
     similarity: number;
     confidence: 'HIGH' | 'MEDIUM' | 'LOW';
+    sourceTable?: 'SNI' | 'ZFS04';
   };
 }
 
@@ -95,6 +143,7 @@ export interface ValidationSummary {
   duplicateRows: number;
   ruleStats: {
     ruleDuplicatePk: number;
+    ruleHierarchyViolation: number;
     rule1SuperiorMismatch: number;
     rule2DigitMismatch: number;
     rule3CityIdMissingOrInvalid: number;

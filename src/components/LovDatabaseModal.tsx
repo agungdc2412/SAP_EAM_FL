@@ -1,19 +1,31 @@
 import React, { useState } from 'react';
-import { LOV_DATABASE, LovItem } from '../data/lovDatabase';
-import { Search, Database, Copy, Check } from 'lucide-react';
+import { LOV_DATABASE } from '../data/lovDatabase';
+import { SNI_DATABASE } from '../data/sniDatabase';
+import { Search, Database, Copy, Check, Layers } from 'lucide-react';
+import { FunclocModule } from '../types/flTypes';
 
-export const LovDatabaseModal: React.FC = () => {
+interface LovDatabaseModalProps {
+  initialModule?: FunclocModule;
+}
+
+export const LovDatabaseModal: React.FC<LovDatabaseModalProps> = ({ initialModule = 'ZFS04' }) => {
+  const [activeTab, setActiveTab] = useState<'SNI' | 'ZFS04'>(
+    initialModule === 'ZFS01' ? 'SNI' : 'ZFS04'
+  );
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedPlant, setSelectedPlant] = useState<string>('ALL');
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
 
-  const plants = Array.from(new Set(LOV_DATABASE.map(item => item.plant))).sort();
+  const activeData = activeTab === 'SNI' ? SNI_DATABASE : LOV_DATABASE;
 
-  const filteredItems = LOV_DATABASE.filter(item => {
+  const plants = Array.from(new Set(activeData.map(item => item.plant))).sort();
+
+  const filteredItems = activeData.filter(item => {
     const matchesPlant = selectedPlant === 'ALL' || item.plant === selectedPlant;
     const q = searchQuery.toLowerCase();
+    const cityName = 'citySni' in item ? (item as any).citySni : (item as any).cityHomepass;
     const matchesSearch = 
-      item.cityHomepass.toLowerCase().includes(q) ||
+      cityName.toLowerCase().includes(q) ||
       item.cityId.toLowerCase().includes(q) ||
       item.plant.toLowerCase().includes(q) ||
       item.workCenter.toLowerCase().includes(q) ||
@@ -30,17 +42,57 @@ export const LovDatabaseModal: React.FC = () => {
 
   return (
     <div className="bg-white border border-slate-200 rounded-lg p-4 space-y-4">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-200 pb-4">
+      {/* Top Header & Tab Switcher */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-slate-200 pb-4">
         <div>
           <div className="flex items-center gap-2">
             <Database className="w-4 h-4 text-slate-700" />
             <h2 className="text-sm font-bold text-slate-900">
-              Database Referensi LOV (111 Konfigurasi Kota & Plant)
+              Master Data Referensi Wilayah & Konfigurasi SAP
             </h2>
           </div>
           <p className="text-xs text-slate-500 mt-1">
-            Konfigurasi Level 2 General resmi untuk validasi Plant-City, Work Center, dan Cost Center.
+            Konfigurasi Level 2 resmi untuk pemetaan Plant, City ID, Work Center, dan Cost Center.
           </p>
+        </div>
+
+        {/* Database Switcher Tabs */}
+        <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-xs font-semibold self-start lg:self-center">
+          <button
+            onClick={() => {
+              setActiveTab('SNI');
+              setSelectedPlant('ALL');
+            }}
+            className={`px-3 py-1.5 rounded-md transition-all flex items-center gap-1.5 ${
+              activeTab === 'SNI'
+                ? 'bg-blue-600 text-white shadow-2xs font-bold'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <Layers className="w-3.5 h-3.5" />
+            <span>Referensi SNI (424 Kota/Kab · ZFS01)</span>
+          </button>
+          <button
+            onClick={() => {
+              setActiveTab('ZFS04');
+              setSelectedPlant('ALL');
+            }}
+            className={`px-3 py-1.5 rounded-md transition-all flex items-center gap-1.5 ${
+              activeTab === 'ZFS04'
+                ? 'bg-blue-600 text-white shadow-2xs font-bold'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <Layers className="w-3.5 h-3.5" />
+            <span>LOV Homepass (111 Kota · ZFS04)</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Filter and Search Bar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="text-xs text-slate-600">
+          Menampilkan <strong>{filteredItems.length}</strong> dari <strong>{activeData.length}</strong> entri konfigurasi {activeTab === 'SNI' ? 'SNI Nasional' : 'LOV Homepass'}.
         </div>
 
         <div className="flex items-center gap-2">
@@ -50,7 +102,7 @@ export const LovDatabaseModal: React.FC = () => {
             onChange={(e) => setSelectedPlant(e.target.value)}
             className="text-xs px-2.5 py-1.5 border border-slate-300 rounded-md bg-white text-slate-700 focus:outline-none focus:ring-1 focus:ring-slate-900"
           >
-            <option value="ALL">Semua Plant ({LOV_DATABASE.length})</option>
+            <option value="ALL">Semua Plant ({activeData.length})</option>
             {plants.map(p => (
               <option key={p} value={p}>Plant {p}</option>
             ))}
@@ -70,12 +122,15 @@ export const LovDatabaseModal: React.FC = () => {
         </div>
       </div>
 
+      {/* Table */}
       <div className="overflow-x-auto max-h-[600px] overflow-y-auto border border-slate-200 rounded-md">
         <table className="w-full text-left text-xs border-collapse">
           <thead className="bg-slate-50 sticky top-0 z-10 border-b border-slate-200 text-slate-700 uppercase font-semibold">
             <tr>
               <th className="py-2.5 px-3">#</th>
-              <th className="py-2.5 px-3">City Homepass (Nama Kota/Kab)</th>
+              <th className="py-2.5 px-3">
+                {activeTab === 'SNI' ? 'Nama Kota / Kabupaten SNI' : 'City Homepass'}
+              </th>
               <th className="py-2.5 px-3">City ID (3 Digit)</th>
               <th className="py-2.5 px-3">Plant (Lev 1)</th>
               <th className="py-2.5 px-3">Work Center</th>
@@ -84,33 +139,36 @@ export const LovDatabaseModal: React.FC = () => {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {filteredItems.map((item, idx) => (
-              <tr key={`${item.cityId}_${idx}`} className="hover:bg-slate-50 transition-colors">
-                <td className="py-2 px-3 text-slate-400 font-mono tabular-nums">{idx + 1}</td>
-                <td className="py-2 px-3 font-medium text-slate-900">{item.cityHomepass}</td>
-                <td className="py-2 px-3">
-                  <span className="font-mono font-bold text-slate-900 bg-slate-100 px-1.5 py-0.5 rounded">
-                    {item.cityId}
-                  </span>
-                </td>
-                <td className="py-2 px-3 font-mono text-slate-700">{item.plant}</td>
-                <td className="py-2 px-3 font-mono text-slate-700">{item.workCenter}</td>
-                <td className="py-2 px-3 font-mono text-slate-700">{item.costCenter}</td>
-                <td className="py-2 px-3 text-right">
-                  <button
-                    onClick={() => handleCopy(`${item.plant}-${item.cityId}`)}
-                    className="p-1 text-slate-400 hover:text-slate-800 transition-colors inline-flex items-center gap-1"
-                    title={`Salin Lev2: ${item.plant}-${item.cityId}`}
-                  >
-                    {copiedCode === `${item.plant}-${item.cityId}` ? (
-                      <Check className="w-3.5 h-3.5 text-emerald-600" />
-                    ) : (
-                      <Copy className="w-3.5 h-3.5" />
-                    )}
-                  </button>
-                </td>
-              </tr>
-            ))}
+            {filteredItems.map((item, idx) => {
+              const cityName = 'citySni' in item ? (item as any).citySni : (item as any).cityHomepass;
+              return (
+                <tr key={`${item.cityId}_${idx}`} className="hover:bg-slate-50 transition-colors">
+                  <td className="py-2 px-3 text-slate-400 font-mono tabular-nums">{idx + 1}</td>
+                  <td className="py-2 px-3 font-medium text-slate-900">{cityName}</td>
+                  <td className="py-2 px-3">
+                    <span className="font-mono font-bold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200">
+                      {item.cityId}
+                    </span>
+                  </td>
+                  <td className="py-2 px-3 font-mono text-slate-700">{item.plant}</td>
+                  <td className="py-2 px-3 font-mono text-slate-700">{item.workCenter}</td>
+                  <td className="py-2 px-3 font-mono text-slate-700">{item.costCenter}</td>
+                  <td className="py-2 px-3 text-right">
+                    <button
+                      onClick={() => handleCopy(`${item.plant}-${item.cityId}`)}
+                      className="p-1 text-slate-400 hover:text-slate-800 transition-colors inline-flex items-center gap-1 cursor-pointer"
+                      title={`Salin Lev2: ${item.plant}-${item.cityId}`}
+                    >
+                      {copiedCode === `${item.plant}-${item.cityId}` ? (
+                        <Check className="w-3.5 h-3.5 text-emerald-600" />
+                      ) : (
+                        <Copy className="w-3.5 h-3.5" />
+                      )}
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
