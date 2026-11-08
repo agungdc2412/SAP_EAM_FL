@@ -17,7 +17,9 @@ import {
   Sparkles,
   Pencil,
   X,
-  MapPin
+  MapPin,
+  FileText,
+  GitFork
 } from 'lucide-react';
 import { extractDigit6to8 } from '../services/validationService';
 
@@ -169,103 +171,58 @@ export const DataGrid: React.FC<DataGridProps> = ({
   const endRowIndex = isAllPages ? totalRecords : Math.min(safeCurrentPage * pageSize, totalRecords);
 
   return (
-    <div className="bg-white border border-slate-200 rounded-lg overflow-hidden shadow-2xs space-y-0">
+    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-2xs space-y-0">
       {/* Table Data Viewport */}
       <div className="overflow-x-auto">
         <table className="w-full text-left text-xs border-collapse">
           <thead>
-            {/* Top Multi-Column Category Header */}
-            <tr className="bg-slate-100/90 border-b border-slate-200 text-[10px] uppercase font-bold text-slate-500 tracking-wider">
-              <th colSpan={2} className="py-1.5 px-3 text-center border-r border-slate-200">Baris & Status</th>
-              <th colSpan={2} className="py-1.5 px-3 border-r border-slate-200 text-slate-800">
-                Identitas Functional Location (Col A = Primary Key)
-              </th>
-              <th colSpan={3} className="py-1.5 px-3 border-r border-slate-200 bg-blue-50/50 text-blue-900">
-                Wilayah & Seksi (LOV Mapping)
-              </th>
-              <th colSpan={1} className="py-1.5 px-3 border-r border-slate-200 bg-amber-50/60 text-amber-950">
-                Titik Koordinat (GIS)
-              </th>
-              <th colSpan={4} className="py-1.5 px-3 border-r border-slate-200 text-slate-700">
-                Organisasi Pemeliharaan SAP PM
-              </th>
-              <th className="py-1.5 px-3 text-right">Aksi Sinkronisasi</th>
-            </tr>
-
-            {/* Column Header Names */}
-            <tr className="bg-slate-50 border-b border-slate-200 text-slate-700 font-semibold">
+            {/* Clean Single-Tier Column Header matching mockup */}
+            <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-700 font-semibold">
               <th className="py-2.5 px-3 w-10 text-center text-slate-400 font-mono">#</th>
               <th className="py-2.5 px-3 w-28">Status</th>
               
-              {/* Primary Columns */}
-              <th className="py-2.5 px-3 min-w-[270px]">
-                <div className="flex items-center gap-1.5">
-                  <span className="font-mono text-[10px] font-bold text-slate-500">Col A</span>
-                  <span>Functional Location (PK)</span>
-                </div>
+              {/* Primary Columns with SAP Letters */}
+              <th className="py-2.5 px-3 min-w-[230px]">
+                <span>Functional location </span>
+                <span className="font-mono text-[11px] text-slate-400 font-normal">A</span>
               </th>
-              <th className="py-2.5 px-3 min-w-[190px]">
-                <div className="flex items-center gap-1.5">
-                  <span className="font-mono text-[10px] font-bold text-slate-500">Col D</span>
-                  <span>Superior FunctLoc</span>
-                </div>
+              
+              <th className="py-2.5 px-3 min-w-[140px]">
+                <span>Superior </span>
+                <span className="font-mono text-[11px] text-slate-400 font-normal">D</span>
               </th>
 
               {/* Location & Section Columns */}
-              <th className="py-2.5 px-3 min-w-[170px] bg-blue-50/20">
-                <div className="flex items-center gap-1.5">
-                  <span className="font-mono text-[10px] font-bold text-blue-700">Col AB</span>
-                  <span>City (Nama Kota)</span>
-                </div>
+              <th className="py-2.5 px-3 min-w-[160px]">
+                <span>Kota </span>
+                <span className="font-mono text-[11px] text-slate-400 font-normal">AB</span>
               </th>
-              <th className="py-2.5 px-3 min-w-[125px] bg-blue-50/40 font-bold text-blue-950">
-                <div className="flex items-center gap-1.5">
-                  <span className="font-mono text-[10px] font-bold text-blue-800">Col AH</span>
-                  <span>City ID (LOV)</span>
-                </div>
+
+              <th className="py-2.5 px-3 min-w-[90px]">
+                <span>City </span>
+                <span className="font-mono text-[11px] text-slate-400 font-normal">AH</span>
               </th>
-              <th className="py-2.5 px-3 min-w-[120px] bg-blue-50/20">
-                <div className="flex items-center gap-1.5">
-                  <span className="font-mono text-[10px] font-bold text-blue-700">Col H</span>
-                  <span>Plan Section</span>
-                </div>
+
+              <th className="py-2.5 px-3 min-w-[90px]">
+                <span>Plan </span>
+                <span className="font-mono text-[11px] text-slate-400 font-normal">H</span>
               </th>
 
               {/* Titik Koordinat Column */}
-              <th className="py-2.5 px-3 min-w-[170px] bg-amber-50/30 text-amber-950 font-bold">
-                <div className="flex items-center gap-1.5">
-                  <span className="font-mono text-[10px] font-bold text-amber-800">Col N</span>
-                  <span>Lat & Long (Koordinat)</span>
-                </div>
-              </th>
-
-              {/* SAP Org Columns */}
-              <th className="py-2.5 px-3 min-w-[80px]">
-                <span className="font-mono text-[10px] font-bold text-slate-500 mr-1">Col F</span>
-                <span>Plant</span>
-              </th>
-              <th className="py-2.5 px-3 min-w-[95px]">
-                <span className="font-mono text-[10px] font-bold text-slate-500 mr-1">Col J</span>
-                <span>Work Ctr</span>
-              </th>
-              <th className="py-2.5 px-3 min-w-[95px]">
-                <span className="font-mono text-[10px] font-bold text-slate-500 mr-1">Col K</span>
-                <span>Cost Ctr</span>
-              </th>
-              <th className="py-2.5 px-3 min-w-[65px]">
-                <span className="font-mono text-[10px] font-bold text-slate-500 mr-1">Col AE</span>
-                <span>Negara</span>
+              <th className="py-2.5 px-3 min-w-[160px]">
+                <span>Koordinat </span>
+                <span className="font-mono text-[11px] text-slate-400 font-normal">N</span>
               </th>
 
               {/* Actions Header */}
-              <th className="py-2.5 px-3 text-right min-w-[140px]">Sinkronisasi</th>
+              <th className="py-2.5 px-3 text-right min-w-[110px]">Aksi</th>
             </tr>
           </thead>
 
           <tbody className="divide-y divide-slate-100 font-sans">
             {paginatedRecords.length === 0 ? (
               <tr>
-                <td colSpan={13} className="py-10 text-center text-slate-500">
+                <td colSpan={9} className="py-10 text-center text-slate-500">
                   Tidak ada baris data yang cocok dengan filter.
                 </td>
               </tr>
@@ -284,58 +241,74 @@ export const DataGrid: React.FC<DataGridProps> = ({
                 return (
                   <React.Fragment key={record.id}>
                     <tr
-                      className={`hover:bg-slate-50/80 transition-colors ${
+                      className={`transition-colors ${
                         record.isDuplicatePk
-                          ? 'bg-rose-100/30'
+                          ? 'bg-[#fee2e2]/60 hover:bg-[#fee2e2]/80'
                           : record.hasErrors
-                          ? 'bg-rose-50/20'
+                          ? 'bg-rose-50/25 hover:bg-rose-50/45'
                           : record.isRepaired
-                          ? 'bg-blue-50/20'
-                          : ''
+                          ? 'bg-blue-50/20 hover:bg-blue-50/35'
+                          : 'bg-white hover:bg-slate-50/70'
                       }`}
                     >
-                      {/* Index */}
+                      {/* 1. Index */}
                       <td className="py-2.5 px-3 text-center text-slate-400 font-mono tabular-nums">
                         {record.rowIndex}
                       </td>
 
-                      {/* Status Badge */}
+                      {/* 2. Status Pill Badge */}
                       <td className="py-2.5 px-3 whitespace-nowrap">
                         {record.isDuplicatePk ? (
                           <span 
-                            className="inline-flex items-center gap-1 text-[11px] font-bold text-rose-800 bg-rose-100 px-2 py-0.5 rounded border border-rose-300"
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium bg-[#fee2e2] text-[#991b1b] border border-[#fecdd3]"
                             title={`Duplikat PK dengan baris #${record.duplicateWithRows?.join(', #')}`}
                           >
-                            <AlertTriangle className="w-3 h-3 text-rose-600" />
-                            <span>Duplikat PK</span>
+                            <FileText className="w-3 h-3 text-[#dc2626]" />
+                            <span>Duplikat</span>
+                          </span>
+                        ) : record.fuzzyCitySuggestion ? (
+                          <span 
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium bg-[#fef3c7] text-[#92400e] border border-[#fde68a]"
+                            title={`Saran typo: ${record.fuzzyCitySuggestion.cityHomepass}`}
+                          >
+                            <Sparkles className="w-3 h-3 text-[#d97706]" />
+                            <span>Typo</span>
+                          </span>
+                        ) : supIssue?.rule === 'RULE_HIERARCHY_VIOLATION' ? (
+                          <span 
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium bg-[#fef3c7] text-[#92400e] border border-[#fde68a]"
+                            title="Superior FL tidak konsisten dengan Col A"
+                          >
+                            <GitFork className="w-3 h-3 text-[#d97706]" />
+                            <span>Hierarki</span>
                           </span>
                         ) : record.hasErrors ? (
-                          <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-700 bg-rose-50 px-2 py-0.5 rounded border border-rose-200">
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium bg-rose-50 text-rose-700 border border-rose-200">
                             <AlertCircle className="w-3 h-3 text-rose-600" />
-                            <span>{record.issues.filter(i => i.severity === 'error').length} Isu</span>
+                            <span>Perlu Aksi</span>
                           </span>
                         ) : record.isRepaired ? (
-                          <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
-                            <CheckCircle2 className="w-3 h-3 text-blue-600" />
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium bg-blue-50 text-blue-700 border border-blue-200">
+                            <Check className="w-3 h-3 text-blue-600" />
                             <span>Sync</span>
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
                             <Check className="w-3 h-3 text-emerald-600" />
                             <span>Valid</span>
                           </span>
                         )}
                       </td>
 
-                      {/* Col A: Functional Location (PK Immutable) */}
+                      {/* 3. Col A: Functional location A */}
                       <td className="py-2.5 px-3">
                         <div className="flex flex-col">
-                          <div className="flex items-center gap-1.5 font-mono text-xs">
+                          <div className="flex items-center">
                             <span 
-                              className={`px-1.5 py-0.5 rounded font-semibold border ${
+                              className={`px-2.5 py-1 rounded-md font-mono text-xs border ${
                                 record.isDuplicatePk
-                                  ? 'bg-rose-100 text-rose-950 border-rose-300 font-bold'
-                                  : 'bg-slate-100 text-slate-900 border-slate-200'
+                                  ? 'bg-white text-slate-900 border-rose-300 font-semibold shadow-2xs'
+                                  : 'bg-white text-slate-900 border-slate-200 shadow-2xs'
                               }`}
                               title="Primary Key (Immutable - Terkunci)"
                             >
@@ -343,28 +316,28 @@ export const DataGrid: React.FC<DataGridProps> = ({
                             </span>
                           </div>
                           {record.isDuplicatePk && (
-                            <span className="text-[10px] text-rose-700 font-sans font-semibold mt-0.5">
-                              Duplikat di baris: #{record.duplicateWithRows?.join(', #')}
+                            <span className="text-[11px] text-rose-600 font-sans mt-0.5 font-normal">
+                              Sama dengan baris {record.duplicateWithRows?.join(', ')}
+                            </span>
+                          )}
+                          {!record.isDuplicatePk && supIssue?.rule === 'RULE_HIERARCHY_VIOLATION' && (
+                            <span className="text-[11px] text-amber-700 font-sans mt-0.5 font-normal">
+                              Superior FL tidak cocok
                             </span>
                           )}
                         </div>
                       </td>
 
-                      {/* Col D: Superior FunctLoc (Editable) */}
+                      {/* 4. Col D: Superior D */}
                       <td className="py-2.5 px-3">
                         <div className="flex flex-col">
                           {renderEditableCell(
                             record,
                             'superiorFunctLoc',
-                            <span className={`font-mono text-xs ${supIssue ? 'text-rose-700 font-semibold' : 'text-slate-700'}`}>
-                              {record.data.superiorFunctLoc || <span className="text-slate-400 italic">(kosong)</span>}
+                            <span className={`font-mono text-xs ${supIssue ? 'text-rose-700 font-semibold' : 'text-slate-800'}`}>
+                              {record.data.superiorFunctLoc || <span className="text-slate-400 italic">belum</span>}
                             </span>,
                             true
-                          )}
-                          {supIssue?.rule === 'RULE_HIERARCHY_VIOLATION' && (
-                            <span className="text-[9px] font-mono font-bold text-rose-700 bg-rose-50 border border-rose-200 px-1 py-0.2 rounded w-fit mt-0.5">
-                              Hierarchy Violation
-                            </span>
                           )}
                           {isFieldRepaired(record, 'superiorFunctLoc') && (
                             <span className="text-[10px] text-slate-400 line-through font-mono">
@@ -374,139 +347,31 @@ export const DataGrid: React.FC<DataGridProps> = ({
                         </div>
                       </td>
 
-                      {/* Col AB: City Name (Editable) */}
-                      <td className="py-2.5 px-3 bg-blue-50/10">
-                        <div className="flex flex-col gap-1">
+                      {/* 5. Col AB: Kota AB */}
+                      <td className="py-2.5 px-3">
+                        <div className="flex flex-col">
                           {renderEditableCell(
                             record,
                             'city',
                             <span
-                              className={`font-medium truncate max-w-[170px] inline-block ${
-                                record.fuzzyCitySuggestion ? 'text-amber-800 font-semibold' : 'text-slate-800'
-                              }`}
+                              className="font-medium text-xs text-slate-800 uppercase tracking-wide truncate max-w-[180px] inline-block"
                               title={record.data.city}
                             >
-                              {record.data.city || <span className="text-slate-400 italic">(kosong)</span>}
+                              {record.data.city || <span className="text-slate-400 italic font-normal lowercase">belum</span>}
                             </span>
                           )}
                           {record.fuzzyCitySuggestion && (
-                            <div className="p-1.5 bg-amber-50/90 border border-amber-200 rounded text-[11px] shadow-2xs space-y-1">
-                              <div className="flex items-center gap-1 text-amber-900 font-semibold text-[10px]">
-                                <Sparkles className="w-3 h-3 text-amber-600 shrink-0" />
-                                <span>Typo? Saran LOV:</span>
-                              </div>
-                              <div className="font-mono font-bold text-slate-900 text-[11px] leading-tight">
-                                "{record.fuzzyCitySuggestion.cityHomepass}"
-                              </div>
-                              <div className="flex items-center justify-between gap-1 pt-0.5">
-                                <span className="text-[10px] font-mono text-amber-800">
-                                  ID: {record.fuzzyCitySuggestion.cityId} ({Math.round(record.fuzzyCitySuggestion.similarity * 100)}%)
-                                </span>
-                                {onApplyFuzzyCity && (
-                                  <button
-                                    onClick={() => onApplyFuzzyCity(record)}
-                                    className="px-2 py-0.5 bg-amber-600 hover:bg-amber-700 text-white rounded text-[10px] font-bold transition-colors flex items-center gap-1 cursor-pointer"
-                                    title="Terapkan nama kota dan sinkronkan ID LOV"
-                                  >
-                                    <Check className="w-2.5 h-2.5" />
-                                    <span>Terapkan</span>
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </td>
-
-                      {/* Col AH: City ID Generated (Editable) */}
-                      <td className="py-2.5 px-3 bg-blue-50/20">
-                        <div className="flex flex-col">
-                          {renderEditableCell(
-                            record,
-                            'cityIdGenerated',
-                            <span className={`font-mono font-bold text-xs px-1.5 py-0.5 rounded inline-block w-fit ${
-                              !record.data.cityIdGenerated
-                                ? 'bg-rose-100 text-rose-900'
-                                : isFieldRepaired(record, 'cityIdGenerated')
-                                ? 'bg-emerald-100 text-emerald-900'
-                                : 'bg-blue-100 text-blue-900'
-                            }`}>
-                              {record.data.cityIdGenerated || <span className="italic font-normal text-rose-700">Belum Gen</span>}
-                            </span>,
-                            true
-                          )}
-                        </div>
-                      </td>
-
-                      {/* Col H: Plan Section (Editable) */}
-                      <td className="py-2.5 px-3 bg-blue-50/10">
-                        <div className="flex flex-col">
-                          <div className="flex items-center gap-1.5">
-                            {renderEditableCell(
-                              record,
-                              'plantSection',
-                              <span className={`font-mono font-bold text-xs px-1.5 py-0.5 rounded inline-block w-fit ${
-                                planIssue
-                                  ? 'bg-rose-100 text-rose-900'
-                                  : isFieldRepaired(record, 'plantSection')
-                                  ? 'bg-blue-100 text-blue-900'
-                                  : 'text-slate-800 bg-slate-100'
-                              }`}>
-                                {record.data.plantSection || <span className="italic font-normal text-slate-400">-</span>}
-                              </span>,
-                              true
-                            )}
-                            {!isDigitMatch && flDigit6to8 && (
-                              <span className="text-[10px] text-rose-600 font-mono" title={`Digit 6-8 FL Kolom A adalah ${flDigit6to8}`}>
-                                ≠ {flDigit6to8}
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              <span className="text-[10px] text-amber-800 font-sans">
+                                Saran: <strong className="font-semibold">{record.fuzzyCitySuggestion.cityHomepass}</strong>
                               </span>
-                            )}
-                          </div>
-                          {isFieldRepaired(record, 'plantSection') && (
-                            <span className="text-[10px] text-slate-400 line-through font-mono">
-                              {record.originalData.plantSection}
-                            </span>
-                          )}
-                        </div>
-                      </td>
-
-                      {/* Col N: Titik Koordinat / Lat & Long (Editable + Auto-fix) */}
-                      <td className="py-2.5 px-3 bg-amber-50/15">
-                        <div className="flex flex-col gap-1">
-                          {renderEditableCell(
-                            record,
-                            'latLong',
-                            <span className={`font-mono text-xs ${
-                              coordIssue?.severity === 'error'
-                                ? 'text-rose-700 font-bold'
-                                : coordIssue?.severity === 'warning'
-                                ? 'text-amber-800 font-semibold'
-                                : isFieldRepaired(record, 'latLong')
-                                ? 'text-blue-700 font-medium'
-                                : 'text-slate-700'
-                            }`}>
-                              {record.data.latLong || <span className="text-slate-400 italic">(kosong)</span>}
-                            </span>,
-                            true
-                          )}
-
-                          {coordIssue && (
-                            <div className="flex items-center justify-between gap-1 pt-0.5">
-                              <span className={`text-[10px] font-mono px-1 rounded ${
-                                coordIssue.severity === 'error'
-                                  ? 'bg-rose-100 text-rose-800 font-bold'
-                                  : 'bg-amber-100 text-amber-800 font-semibold'
-                              }`}>
-                                {coordIssue.message.includes('terbalik') ? '⚠️ Terbalik' : '⚠️ Format'}
-                              </span>
-                              {coordIssue.canAutoFix && coordIssue.suggestedFix && (
+                              {onApplyFuzzyCity && (
                                 <button
-                                  onClick={() => onUpdateCell(record, 'latLong', coordIssue.suggestedFix!)}
-                                  className="px-1.5 py-0.5 bg-amber-600 hover:bg-amber-700 text-white rounded text-[10px] font-bold transition-colors flex items-center gap-1 cursor-pointer"
-                                  title={`Perbaiki: ${coordIssue.suggestedFix}`}
+                                  onClick={() => onApplyFuzzyCity(record)}
+                                  className="text-[10px] px-1.5 py-0.2 bg-amber-600 hover:bg-amber-700 text-white rounded font-medium cursor-pointer"
+                                  title="Terapkan perbaikan nama kota"
                                 >
-                                  <MapPin className="w-2.5 h-2.5" />
-                                  <span>{coordIssue.message.includes('terbalik') ? 'Balikkan' : 'Standar'}</span>
+                                  Terapkan
                                 </button>
                               )}
                             </div>
@@ -514,74 +379,86 @@ export const DataGrid: React.FC<DataGridProps> = ({
                         </div>
                       </td>
 
-                      {/* Col F: Plant (Editable) */}
-                      <td className="py-2.5 px-3 font-mono text-slate-700">
+                      {/* 6. Col AH: City AH */}
+                      <td className="py-2.5 px-3">
                         {renderEditableCell(
                           record,
-                          'planningPlant',
-                          <span className={plantIssue ? 'text-amber-700 font-semibold' : ''}>
-                            {record.data.planningPlant || record.data.maintPlant || '-'}
-                          </span>,
+                          'cityIdGenerated',
+                          record.data.cityIdGenerated ? (
+                            <span className="font-mono text-xs px-2 py-0.5 rounded bg-white border border-slate-200 text-slate-800 shadow-2xs font-semibold">
+                              {record.data.cityIdGenerated}
+                            </span>
+                          ) : (
+                            <span className="font-mono text-xs text-slate-400 italic">belum</span>
+                          ),
                           true
                         )}
                       </td>
 
-                      {/* Col J: Work Center (Editable) */}
-                      <td className="py-2.5 px-3 font-mono text-slate-700">
-                        {renderEditableCell(
-                          record,
-                          'workCenter',
-                          <span className={wcIssue ? 'text-amber-700 font-semibold' : ''}>
-                            {record.data.workCenter || '-'}
-                          </span>,
-                          true
-                        )}
+                      {/* 7. Col H: Plan H */}
+                      <td className="py-2.5 px-3">
+                        <div className="flex items-center gap-1.5">
+                          {renderEditableCell(
+                            record,
+                            'plantSection',
+                            record.data.plantSection ? (
+                              <span className="font-mono text-xs px-2 py-0.5 rounded bg-white border border-slate-200 text-slate-800 shadow-2xs font-semibold">
+                                {record.data.plantSection}
+                              </span>
+                            ) : (
+                              <span className="font-mono text-xs text-slate-400 italic">belum</span>
+                            ),
+                            true
+                          )}
+                          {!isDigitMatch && flDigit6to8 && record.data.plantSection && (
+                            <span className="text-[10px] text-rose-600 font-mono" title={`Digit 6-8 FL Kolom A adalah ${flDigit6to8}`}>
+                              ≠ {flDigit6to8}
+                            </span>
+                          )}
+                        </div>
                       </td>
 
-                      {/* Col K: Cost Center (Editable) */}
-                      <td className="py-2.5 px-3 font-mono text-slate-700">
-                        {renderEditableCell(
-                          record,
-                          'costCenter',
-                          <span className={ccIssue ? 'text-amber-700 font-semibold' : ''}>
-                            {record.data.costCenter || '-'}
-                          </span>,
-                          true
-                        )}
+                      {/* 8. Col N: Koordinat N */}
+                      <td className="py-2.5 px-3">
+                        <div className="flex items-center justify-between gap-1">
+                          {renderEditableCell(
+                            record,
+                            'latLong',
+                            <span className={`font-mono text-xs ${
+                              coordIssue?.severity === 'error'
+                                ? 'text-rose-700 font-semibold'
+                                : coordIssue?.severity === 'warning'
+                                ? 'text-amber-800 font-semibold'
+                                : 'text-slate-700'
+                            }`}>
+                              {record.data.latLong || <span className="text-slate-400 italic">belum</span>}
+                            </span>,
+                            true
+                          )}
+                          {coordIssue?.canAutoFix && coordIssue.suggestedFix && (
+                            <button
+                              onClick={() => onUpdateCell(record, 'latLong', coordIssue.suggestedFix!)}
+                              className="px-1.5 py-0.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded text-[10px] font-medium transition-colors cursor-pointer"
+                              title={`Perbaiki format: ${coordIssue.suggestedFix}`}
+                            >
+                              {coordIssue.message.includes('terbalik') ? 'Balik' : 'Perbaiki'}
+                            </button>
+                          )}
+                        </div>
                       </td>
 
-                      {/* Col AE: Country (Editable) */}
-                      <td className="py-2.5 px-3 font-mono text-slate-700">
-                        {renderEditableCell(
-                          record,
-                          'country',
-                          <span>{record.data.country || 'ID'}</span>,
-                          true
-                        )}
-                      </td>
-
-                      {/* Actions */}
+                      {/* 9. Aksi */}
                       <td className="py-2.5 px-3 text-right whitespace-nowrap">
                         <div className="flex items-center justify-end gap-1">
-                          <button
-                            onClick={() => onSyncPlanSection(record)}
-                            className="px-2 py-1 text-[11px] font-semibold text-blue-800 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded transition-colors"
-                            title="Generate City ID ke Kolom AH & sinkronkan Kolom H, F, I, J, K"
-                          >
-                            Sync LOV
-                          </button>
-
-                          <button
-                            onClick={() => onSyncFLDigit(record)}
-                            className={`px-2 py-1 text-[11px] font-semibold rounded transition-colors border ${
-                              isDigitMatch
-                                ? 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-                                : 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100 font-bold'
-                            }`}
-                            title={`Cocokkan Kolom H dengan 3-digit Kolom A (${flDigit6to8})`}
-                          >
-                            Sync FL
-                          </button>
+                          {record.hasErrors && (
+                            <button
+                              onClick={() => onRepairRow(record)}
+                              className="px-2 py-1 text-[11px] font-medium text-slate-800 bg-white hover:bg-slate-50 border border-slate-300 rounded-md transition-colors shadow-2xs cursor-pointer"
+                              title="Perbaiki masalah pada baris ini"
+                            >
+                              Perbaiki
+                            </button>
+                          )}
 
                           {record.isRepaired && (
                             <button
@@ -596,7 +473,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
                           <button
                             onClick={() => setDetailRecord(record)}
                             className="p-1 text-slate-400 hover:text-slate-800 rounded hover:bg-slate-100 transition-colors"
-                            title="Buka 35 kolom lengkap"
+                            title="Lihat 35 kolom lengkap"
                           >
                             <Eye className="w-3.5 h-3.5" />
                           </button>
@@ -604,7 +481,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
                           <button
                             onClick={() => toggleRow(record.id)}
                             className="p-1 text-slate-400 hover:text-slate-800 rounded hover:bg-slate-100 transition-colors"
-                            title="Audit isu baris ini"
+                            title="Detail temuan audit"
                           >
                             {isExpanded ? (
                               <ChevronDown className="w-3.5 h-3.5" />
@@ -619,7 +496,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
                     {/* Expanded Audit Findings */}
                     {isExpanded && (
                       <tr className="bg-slate-50/70">
-                        <td colSpan={13} className="p-3 border-t border-slate-200">
+                        <td colSpan={9} className="p-3 border-t border-slate-200">
                           <div className="space-y-2">
                             <div className="flex items-center justify-between text-xs font-semibold text-slate-700">
                               <span>Audit Temuan Validasi Baris #{record.rowIndex}</span>

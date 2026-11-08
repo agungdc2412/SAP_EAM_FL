@@ -1,7 +1,7 @@
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
-import { FLRowData, FLRowRecord, FL_COLUMNS } from '../types/flTypes';
-import { validateFLRow } from './validationService';
+import { FLRowData, FLRowRecord, FL_COLUMNS, FunclocModule, ValidationSummary } from '../types/flTypes';
+import { validateFLRow, validateAllRowsAsync } from './validationService';
 
 /**
  * Maps raw imported header names to standard FLRowData fields
@@ -196,10 +196,252 @@ export function createEmptyFLRow(): FLRowData {
   };
 }
 
+export interface FileStreamProgress {
+  stage: string;
+  currentRows: number;
+  totalRows?: number;
+  percent: number;
+  speedRowsPerSec?: number;
+  elapsedSeconds?: number;
+}
+
 /**
- * Parse CSV or TSV string into FLRowRecord array
+ * High-performance streaming file parser designed for datasets with hundreds of thousands of rows.
+ * Reads CSV chunks asynchronously to prevent browser main-thread freezes and Out-Of-Memory errors.
  */
-export function parseCSVText(csvText: string): FLRowRecord[] {
+export async function parseFileStream(
+  file: File,
+  module: FunclocModule = 'ZFS04',
+  onProgress?: (progress: FileStreamProgress) => void,
+  onComplete?: (records: FLRowRecord[], summary: ValidationSummary) => void,
+  onError?: (errMessage: string) => void
+): Promise<void> {
+  const fileName = file.name.toLowerCase();
+  const startTime = performance.now();
+
+  // 1. EXCEL WORKBOOK (.xlsx / .xls)
+  if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
+    try {
+      onProgress?.({
+        stage: 'Membaca binary workbook Excel...',
+        currentRows: 0,
+        percent: 10,
+        elapsedSeconds: 0
+      });
+
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: 'array' });
+      const firstSheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[firstSheetName];
+      const rawRows = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as string[][];
+
+      if (!rawRows || rawRows.length === 0) {
+        onError?.('File Excel tidak memiliki baris data.');
+        return;
+      }
+
+      onProgress?.({
+        stage: `Mengekstrak ${rawRows.length.toLocaleString()} baris data dari sheet...`,
+        currentRows: rawRows.length,
+        totalRows: rawRows.length,
+        percent: 30,
+        elapsedSeconds: Math.round((performance.now() - startTime) / 100) / 10
+      });
+
+      // Map headers
+      let headerIndex = -1;
+      const firstRow = (rawRows[0] || []).map(c => String(c ?? '').trim());
+      const isHeader = firstRow.some(cell => {
+        const l = cell.toLowerCase();
+        return l.includes('functional') || l.includes('location') || l.includes('plant') || l.includes('city') || l.includes('structure');
+      });
+
+      const columnMap: { [colIdx: number]: keyof FLRowData } = {};
+      if (isHeader) {
+        headerIndex = 0;
+        firstRow.forEach((cell, idx) => {
+          const key = mapHeaderToKey(cell);
+          if (key) columnMap[idx] = key;
+        });
+      } else {
+        FL_COLUMNS.forEach((col, idx) => {
+          columnMap[idx] = col.key;
+        });
+      }
+
+      const dataRows = headerIndex >= 0 ? rawRows.slice(headerIndex + 1) : rawRows;
+      const unvalidatedRows: FLRowRecord[] = [];
+
+      for (let idx = 0; idx < dataRows.length; idx++) {
+        const row = dataRows[idx];
+        const rowData = createEmptyFLRow();
+        (row || []).forEach((cellVal, colIdx) => {
+          const fieldKey = columnMap[colIdx] || (colIdx < FL_COLUMNS.length ? FL_COLUMNS[colIdx].key : null);
+          if (fieldKey) {
+            rowData[fieldKey] = String(cellVal ?? '').trim();
+          }
+        });
+
+        unvalidatedRows.push({
+          id: `row_${idx + 1}_${Date.now()}_${idx}`,
+          rowIndex: idx + 1,
+          originalData: { ...rowData },
+          data: rowData,
+          issues: [],
+          repairedFields: [],
+          hasErrors: false,
+          hasWarnings: false,
+          isRepaired: false,
+          module
+        });
+      }
+
+      // Validate asynchronously with progress
+      const { records, summary } = await validateAllRowsAsync(unvalidatedRows, module, (p) => {
+        onProgress?.({
+          stage: p.stage,
+          currentRows: p.current,
+          totalRows: p.total,
+          percent: Math.round(40 + p.percent * 0.6),
+          speedRowsPerSec: p.speedRowsPerSec,
+          elapsedSeconds: p.elapsedSeconds
+        });
+      });
+
+      onComplete?.(records, summary);
+    } catch (err: any) {
+      onError?.('Gagal membaca file Excel: ' + (err?.message || 'Format tidak sesuai'));
+    }
+    return;
+  }
+
+  // 2. CSV / TXT STREAM PARSING
+  const unvalidatedRows: FLRowRecord[] = [];
+  let headerMap: { [colIdx: number]: keyof FLRowData } | null = null;
+  let parsedRowsCount = 0;
+  const totalEstimatedRows = Math.max(100, Math.round(file.size / 130)); // approx 130 bytes/row
+
+  Papa.parse(file, {
+    skipEmptyLines: true,
+    fastMode: true,
+    chunkSize: 1024 * 512, // 512 KB chunks for high throughput
+    chunk: async (results, parser) => {
+      parser.pause();
+      const rows = results.data as string[][];
+      if (rows.length === 0) {
+        parser.resume();
+        return;
+      }
+
+      let startIdx = 0;
+      if (headerMap === null) {
+        const firstRow = rows[0].map(c => String(c ?? '').trim());
+        const isHeader = firstRow.some(cell => {
+          const l = cell.toLowerCase();
+          return l.includes('functional') || l.includes('location') || l.includes('plant') || l.includes('city') || l.includes('structure');
+        });
+
+        headerMap = {};
+        if (isHeader) {
+          firstRow.forEach((cell, idx) => {
+            const key = mapHeaderToKey(cell);
+            if (key) headerMap![idx] = key;
+          });
+          startIdx = 1;
+        } else {
+          FL_COLUMNS.forEach((col, idx) => {
+            headerMap![idx] = col.key;
+          });
+        }
+      }
+
+      for (let i = startIdx; i < rows.length; i++) {
+        const row = rows[i];
+        const rowData = createEmptyFLRow();
+        row.forEach((cellVal, colIdx) => {
+          const fieldKey = headerMap![colIdx] || (colIdx < FL_COLUMNS.length ? FL_COLUMNS[colIdx].key : null);
+          if (fieldKey) {
+            rowData[fieldKey] = String(cellVal ?? '').trim();
+          }
+        });
+
+        parsedRowsCount++;
+        unvalidatedRows.push({
+          id: `row_${parsedRowsCount}_${parsedRowsCount}`,
+          rowIndex: parsedRowsCount,
+          originalData: { ...rowData },
+          data: rowData,
+          issues: [],
+          repairedFields: [],
+          hasErrors: false,
+          hasWarnings: false,
+          isRepaired: false,
+          module
+        });
+      }
+
+      const elapsedMs = Math.max(1, performance.now() - startTime);
+      const speed = Math.round(parsedRowsCount / (elapsedMs / 1000));
+      const percent = Math.min(48, Math.round((parsedRowsCount / totalEstimatedRows) * 45));
+
+      onProgress?.({
+        stage: `Membaca streaming & memetakan kolom (baris ${parsedRowsCount.toLocaleString()})...`,
+        currentRows: parsedRowsCount,
+        totalRows: Math.max(parsedRowsCount, totalEstimatedRows),
+        percent,
+        speedRowsPerSec: speed,
+        elapsedSeconds: Math.round(elapsedMs / 100) / 10
+      });
+
+      // Yield to main event loop
+      await new Promise(r => setTimeout(r, 0));
+      parser.resume();
+    },
+    complete: async () => {
+      try {
+        if (unvalidatedRows.length === 0) {
+          onError?.('Tidak ada baris data yang ditemukan dalam berkas.');
+          return;
+        }
+
+        onProgress?.({
+          stage: `Memulai pipeline validasi untuk ${unvalidatedRows.length.toLocaleString()} baris...`,
+          currentRows: unvalidatedRows.length,
+          totalRows: unvalidatedRows.length,
+          percent: 50,
+          elapsedSeconds: Math.round((performance.now() - startTime) / 100) / 10
+        });
+
+        const { records, summary } = await validateAllRowsAsync(
+          unvalidatedRows,
+          module,
+          (p) => {
+            onProgress?.({
+              stage: p.stage,
+              currentRows: p.current,
+              totalRows: p.total,
+              percent: Math.round(50 + p.percent * 0.5),
+              speedRowsPerSec: p.speedRowsPerSec,
+              elapsedSeconds: p.elapsedSeconds
+            });
+          }
+        );
+
+        onComplete?.(records, summary);
+      } catch (err: any) {
+        onError?.(err?.message || 'Gagal memvalidasi data');
+      }
+    },
+    error: (err) => {
+      onError?.('Gagal memproses streaming CSV: ' + (err?.message || 'Unknown error'));
+    }
+  });
+}
+
+/**
+ * Fast synchronous CSV parser fallback for small text pastes
+ */
+export function parseCSVText(csvText: string, module: FunclocModule = 'ZFS04'): FLRowRecord[] {
   const parsed = Papa.parse(csvText, {
     header: false,
     skipEmptyLines: true,
@@ -208,31 +450,22 @@ export function parseCSVText(csvText: string): FLRowRecord[] {
   const rawRows = parsed.data as string[][];
   if (rawRows.length === 0) return [];
 
-  // Determine if row 0 or row 1 contains headers
   let headerIndex = -1;
   const firstRow = rawRows[0].map(c => String(c).trim());
-  
-  // Check if first row contains recognizable header words
   const isHeader = firstRow.some(cell => {
     const l = cell.toLowerCase();
     return l.includes('functional') || l.includes('location') || l.includes('plant') || l.includes('city') || l.includes('structure');
   });
 
-  if (isHeader) {
-    headerIndex = 0;
-  }
+  if (isHeader) headerIndex = 0;
 
   const columnMap: { [colIdx: number]: keyof FLRowData } = {};
-
   if (headerIndex >= 0) {
     firstRow.forEach((cell, idx) => {
       const key = mapHeaderToKey(cell);
-      if (key) {
-        columnMap[idx] = key;
-      }
+      if (key) columnMap[idx] = key;
     });
   } else {
-    // Positional fallback based on standard 35 columns
     FL_COLUMNS.forEach((col, idx) => {
       columnMap[idx] = col.key;
     });
@@ -243,7 +476,6 @@ export function parseCSVText(csvText: string): FLRowRecord[] {
 
   dataRows.forEach((row, idx) => {
     const rowData = createEmptyFLRow();
-    
     row.forEach((cellVal, colIdx) => {
       const fieldKey = columnMap[colIdx] || (colIdx < FL_COLUMNS.length ? FL_COLUMNS[colIdx].key : null);
       if (fieldKey) {
@@ -251,7 +483,7 @@ export function parseCSVText(csvText: string): FLRowRecord[] {
       }
     });
 
-    const validated = validateFLRow(rowData, idx + 1, `row_${idx + 1}_${Date.now()}`);
+    const validated = validateFLRow(rowData, idx + 1, `row_${idx + 1}_${Date.now()}`, undefined, module);
     records.push(validated);
   });
 
@@ -259,23 +491,21 @@ export function parseCSVText(csvText: string): FLRowRecord[] {
 }
 
 /**
- * Parse binary Excel file (.xlsx / .xls) into FLRowRecord array
+ * Parse binary Excel file (.xlsx / .xls) into FLRowRecord array (synchronous fallback)
  */
-export function parseExcelFile(arrayBuffer: ArrayBuffer): FLRowRecord[] {
+export function parseExcelFile(arrayBuffer: ArrayBuffer, module: FunclocModule = 'ZFS04'): FLRowRecord[] {
   const workbook = XLSX.read(arrayBuffer, { type: 'array' });
   const firstSheetName = workbook.SheetNames[0];
   const worksheet = workbook.Sheets[firstSheetName];
   
-  // Convert sheet to array of rows
   const rawRows = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as string[][];
   if (!rawRows || rawRows.length === 0) return [];
 
-  // Convert to CSV-like structure and parse
   const csvContent = rawRows.map(row => 
     (row || []).map(cell => `"${String(cell ?? '').replace(/"/g, '""')}"`).join(';')
   ).join('\n');
 
-  return parseCSVText(csvContent);
+  return parseCSVText(csvContent, module);
 }
 
 /**

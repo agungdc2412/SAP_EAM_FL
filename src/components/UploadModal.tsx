@@ -1,19 +1,23 @@
 import React, { useState, useRef } from 'react';
 import { Upload, FileText, Download, Check, AlertCircle } from 'lucide-react';
-import { parseCSVText, parseExcelFile, exportToDelimitedCSV } from '../services/csvService';
+import { parseCSVText, exportToDelimitedCSV } from '../services/csvService';
 import { getSampleRecords } from '../data/sampleDataset';
-import { FLRowRecord } from '../types/flTypes';
+import { FLRowRecord, FunclocModule } from '../types/flTypes';
 
 interface UploadModalProps {
   isOpen: boolean;
   onClose: () => void;
   onDataLoaded: (records: FLRowRecord[]) => void;
+  onStartStreamingFile: (file: File) => void;
+  module?: FunclocModule;
 }
 
 export const UploadModal: React.FC<UploadModalProps> = ({
   isOpen,
   onClose,
-  onDataLoaded
+  onDataLoaded,
+  onStartStreamingFile,
+  module = 'ZFS01'
 }) => {
   const [pasteText, setPasteText] = useState('');
   const [isDragging, setIsDragging] = useState(false);
@@ -24,44 +28,8 @@ export const UploadModal: React.FC<UploadModalProps> = ({
 
   const handleFileUpload = (file: File) => {
     setErrorMsg(null);
-    const fileName = file.name.toLowerCase();
-
-    if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        try {
-          const buffer = e.target?.result as ArrayBuffer;
-          const records = parseExcelFile(buffer);
-          if (records.length === 0) {
-            setErrorMsg('File Excel tidak berisi baris data yang valid.');
-            return;
-          }
-          onDataLoaded(records);
-          onClose();
-        } catch (err: any) {
-          setErrorMsg('Gagal membaca file Excel: ' + (err?.message || 'Format tidak sesuai'));
-        }
-      };
-      reader.readAsArrayBuffer(file);
-    } else {
-      // CSV or TXT
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        try {
-          const text = e.target?.result as string;
-          const records = parseCSVText(text);
-          if (records.length === 0) {
-            setErrorMsg('File CSV tidak berisi baris data yang valid.');
-            return;
-          }
-          onDataLoaded(records);
-          onClose();
-        } catch (err: any) {
-          setErrorMsg('Gagal memproses file CSV: ' + (err?.message || 'Format tidak sesuai'));
-        }
-      };
-      reader.readAsText(file);
-    }
+    onClose();
+    onStartStreamingFile(file);
   };
 
   const handlePasteSubmit = () => {

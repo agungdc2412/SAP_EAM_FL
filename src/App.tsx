@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Header } from './components/Header';
 import { ValidationWorkflowBar } from './components/ValidationWorkflowBar';
 import { DataGrid } from './components/DataGrid';
@@ -8,9 +8,10 @@ import { HierarchyDocModal } from './components/HierarchyDocModal';
 import { UploadModal } from './components/UploadModal';
 import { ExportModal } from './components/ExportModal';
 import { ReferenceFuzzyModal } from './components/ReferenceFuzzyModal';
-import { FLRowRecord, FunclocModule, MODULE_CONFIGS, FLRowData } from './types/flTypes';
+import { LoadingPresentationModal } from './components/LoadingPresentationModal';
+import { FLRowRecord, FunclocModule, MODULE_CONFIGS, FLRowData, ValidationSummary } from './types/flTypes';
 import { getSampleRecords } from './data/sampleDataset';
-import { validateAllRows, validateFLRow, extractDigit6to8 } from './services/validationService';
+import { validateAllRows, validateFLRow, extractDigit6to8, validateAllRowsAsync } from './services/validationService';
 import { 
   autoRepairRow, 
   autoRepairAll, 
@@ -20,9 +21,14 @@ import {
   batchRepairPlanSection,
   batchSyncFLVsPlantSection,
   applyFuzzyCitySuggestion,
-  batchApplyAllFuzzyTypoSuggestions
+  batchApplyAllFuzzyTypoSuggestions,
+  batchRepairHierarchy,
+  batchRepairPlanSectionAsync,
+  batchSyncFLVsPlantSectionAsync,
+  batchApplyAllFuzzyTypoSuggestionsAsync,
+  batchRepairHierarchyAsync
 } from './services/repairService';
-import { exportToDelimitedCSV, exportErrorReportCSV } from './services/csvService';
+import { exportToDelimitedCSV, exportErrorReportCSV, parseFileStream } from './services/csvService';
 import { 
   Search, 
   CheckCircle2, 
@@ -33,6 +39,9 @@ export default function App() {
   // Current active structure module: ZFS01 (NonBroadband) or ZFS04 (OSP/Broadband)
   const [currentModule, setCurrentModule] = useState<FunclocModule>('ZFS01');
   const [records, setRecords] = useState<FLRowRecord[]>(() => getSampleRecords('ZFS01'));
+  const [summary, setSummary] = useState<ValidationSummary>(() => {
+    return validateAllRows(getSampleRecords('ZFS01'), 'ZFS01').summary;
+  });
   const [activeTab, setActiveTab] = useState<'validator' | 'scanning' | 'lov' | 'docs'>('validator');
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
@@ -41,10 +50,33 @@ export default function App() {
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'ERROR' | 'DUPLICATE' | 'VALID' | 'REPAIRED'>('ALL');
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'info' | 'warning' } | null>(null);
 
-  // Compute live validation summary for the active module
-  const { summary } = useMemo(() => {
-    return validateAllRows(records, currentModule);
-  }, [records, currentModule]);
+  // Presentation-grade loading modal state
+  const [loadingState, setLoadingState] = useState<{
+    isOpen: boolean;
+    title: string;
+    subtitle: string;
+    stage: string;
+    currentCount: number;
+    totalCount: number;
+    percent: number;
+    speedRowsPerSec: number;
+    elapsedSeconds: number;
+  }>({
+    isOpen: false,
+    title: '',
+    subtitle: '',
+    stage: '',
+    currentCount: 0,
+    totalCount: 0,
+    percent: 0,
+    speedRowsPerSec: 0,
+    elapsedSeconds: 0
+  });
+
+  const refreshSummary = (updatedRecords: FLRowRecord[], mod: FunclocModule = currentModule) => {
+    const { summary: s } = validateAllRows(updatedRecords, mod);
+    setSummary(s);
+  };
 
   // Counts for the 2 main workflow buttons
   const missingCityIdCount = useMemo(() => {
@@ -71,29 +103,111 @@ export default function App() {
     }, 4500);
   };
 
-  // Module switch handler
-  const handleChangeModule = (newModule: FunclocModule) => {
+  // Module switch handler with async chunked revalidation
+  const handleChangeModule = async (newModule: FunclocModule) => {
     if (newModule === currentModule) return;
     setCurrentModule(newModule);
 
-    // Revalidate current records under new module rules
-    const revalidated = records.map(r => 
-      validateFLRow(r.data, r.rowIndex, r.id, r.originalData, newModule)
-    );
-    const { records: finalRecords } = validateAllRows(revalidated, newModule);
-    setRecords(finalRecords);
+    if (records.length > 500) {
+      setLoadingState({
+        isOpen: true,
+        title: `Beralih ke Modul ${MODULE_CONFIGS[newModule].code}`,
+        subtitle: `Validasi ulang ${records.length.toLocaleString()} baris data sesuai standar ${MODULE_CONFIGS[newModule].name}`,
+        stage: 'Memvalidasi ulang seluruh baris...',
+        currentCount: 0,
+        totalCount: records.length,
+        percent: 0,
+        speedRowsPerSec: 0,
+        elapsedSeconds: 0
+      });
 
-    showToast(
-      `Beralih ke Modul ${MODULE_CONFIGS[newModule].code} (${MODULE_CONFIGS[newModule].name}). Data telah divalidasi ulang.`,
-      'info'
-    );
+      const { records: finalRecords, summary: newSummary } = await validateAllRowsAsync(
+        records,
+        newModule,
+        (p) => {
+          setLoadingState(prev => ({
+            ...prev,
+            stage: p.stage,
+            currentCount: p.current,
+            totalCount: p.total,
+            percent: p.percent,
+            speedRowsPerSec: p.speedRowsPerSec || prev.speedRowsPerSec,
+            elapsedSeconds: p.elapsedSeconds || prev.elapsedSeconds
+          }));
+        }
+      );
+
+      setRecords(finalRecords);
+      setSummary(newSummary);
+      setLoadingState(prev => ({ ...prev, percent: 100, stage: '✓ Validasi modul selesai.' }));
+      setTimeout(() => {
+        setLoadingState(prev => ({ ...prev, isOpen: false }));
+        showToast(`Beralih ke Modul ${MODULE_CONFIGS[newModule].code}. Data telah divalidasi ulang.`, 'info');
+      }, 400);
+    } else {
+      const { records: finalRecords, summary: newSummary } = validateAllRows(records, newModule);
+      setRecords(finalRecords);
+      setSummary(newSummary);
+      showToast(`Beralih ke Modul ${MODULE_CONFIGS[newModule].code}. Data telah divalidasi ulang.`, 'info');
+    }
   };
 
   // Load sample dataset for active module
   const handleLoadSample = () => {
     const samples = getSampleRecords(currentModule);
-    setRecords(samples);
+    const { records: val, summary: s } = validateAllRows(samples, currentModule);
+    setRecords(val);
+    setSummary(s);
     showToast(`Data sampel migrasi ${MODULE_CONFIGS[currentModule].code} berhasil dimuat.`);
+  };
+
+  // High-performance streaming file upload handler (handles 100,000+ rows smoothly)
+  const handleStartStreamingFile = (file: File) => {
+    setLoadingState({
+      isOpen: true,
+      title: `Mengimpor: ${file.name}`,
+      subtitle: `Ukuran file ${(file.size / (1024 * 1024)).toFixed(2)} MB · Streaming batch ingestion non-blocking ke modul ${MODULE_CONFIGS[currentModule].code}`,
+      stage: 'Mempersiapkan alokasi stream memori...',
+      currentCount: 0,
+      totalCount: 0,
+      percent: 5,
+      speedRowsPerSec: 0,
+      elapsedSeconds: 0
+    });
+
+    parseFileStream(
+      file,
+      currentModule,
+      (p) => {
+        setLoadingState(prev => ({
+          ...prev,
+          isOpen: true,
+          stage: p.stage,
+          currentCount: p.currentRows,
+          totalCount: p.totalRows || p.currentRows,
+          percent: p.percent,
+          speedRowsPerSec: p.speedRowsPerSec || prev.speedRowsPerSec,
+          elapsedSeconds: p.elapsedSeconds || prev.elapsedSeconds
+        }));
+      },
+      (loadedRecords, loadedSummary) => {
+        setRecords(loadedRecords);
+        setSummary(loadedSummary);
+        setLoadingState(prev => ({
+          ...prev,
+          stage: `✓ Selesai! ${loadedRecords.length.toLocaleString()} baris berhasil dimuat dan divalidasi.`,
+          percent: 100
+        }));
+        setTimeout(() => {
+          setLoadingState(prev => ({ ...prev, isOpen: false }));
+          showToast(`Sukses memuat dan memvalidasi ${loadedRecords.length.toLocaleString()} baris data master FL.`, 'success');
+        }, 500);
+      },
+      (errorMsg) => {
+        setLoadingState(prev => ({ ...prev, isOpen: false }));
+        showToast(errorMsg, 'warning');
+      }
+    );
   };
 
   // FUZZY TYPO FIX: Single Row
@@ -101,21 +215,107 @@ export default function App() {
     const oldCity = record.data.city;
     const targetCity = record.fuzzyCitySuggestion?.cityHomepass || '';
     const { updatedRecord } = applyFuzzyCitySuggestion(record, currentModule);
-    setRecords(prev => prev.map(r => r.id === record.id ? updatedRecord : r));
+    setRecords(prev => {
+      const next = prev.map(r => r.id === record.id ? updatedRecord : r);
+      refreshSummary(next);
+      return next;
+    });
     showToast(
       `Typo diperbaiki: '${oldCity}' -> '${targetCity}' (City ID ${updatedRecord.data.cityIdGenerated} terisi & hierarki sinkron).`,
       'success'
     );
   };
 
-  // FUZZY TYPO FIX: Batch All Typos
-  const handleFixAllTypos = () => {
-    const { repairedRecords, totalFixedCount } = batchApplyAllFuzzyTypoSuggestions(records, currentModule);
-    setRecords(repairedRecords);
-    showToast(
-      `Berhasil memperbaiki ${totalFixedCount} penulisan typo nama kota dan menyinkronkan seluruh ID referensi.`,
-      'success'
-    );
+  // FUZZY TYPO FIX: Batch All Typos with Loading Presentation
+  const handleFixAllTypos = async () => {
+    if (records.length > 500) {
+      setLoadingState({
+        isOpen: true,
+        title: 'Perbaikan Otomatis Seluruh Typo Nama Kota',
+        subtitle: `Menerapkan saran pencocokan Bigram + Levenshtein ke nama resmi dan menyinkronkan ID referensi`,
+        stage: 'Memperbaiki penulisan typo...',
+        currentCount: 0,
+        totalCount: records.length,
+        percent: 0,
+        speedRowsPerSec: 0,
+        elapsedSeconds: 0
+      });
+
+      const { repairedRecords, totalFixedCount } = await batchApplyAllFuzzyTypoSuggestionsAsync(
+        records,
+        currentModule,
+        (p) => {
+          setLoadingState(prev => ({
+            ...prev,
+            stage: p.stage,
+            currentCount: p.current,
+            totalCount: p.total,
+            percent: p.percent,
+            speedRowsPerSec: p.speedRowsPerSec || prev.speedRowsPerSec,
+            elapsedSeconds: p.elapsedSeconds || prev.elapsedSeconds
+          }));
+        }
+      );
+
+      setRecords(repairedRecords);
+      refreshSummary(repairedRecords);
+      setLoadingState(prev => ({ ...prev, percent: 100, stage: '✓ Perbaikan typo selesai.' }));
+      setTimeout(() => {
+        setLoadingState(prev => ({ ...prev, isOpen: false }));
+        showToast(`Berhasil memperbaiki ${totalFixedCount.toLocaleString()} penulisan typo nama kota dan menyinkronkan seluruh ID referensi.`, 'success');
+      }, 400);
+    } else {
+      const { repairedRecords, totalFixedCount } = batchApplyAllFuzzyTypoSuggestions(records, currentModule);
+      setRecords(repairedRecords);
+      refreshSummary(repairedRecords);
+      showToast(`Berhasil memperbaiki ${totalFixedCount} penulisan typo nama kota dan menyinkronkan seluruh ID referensi.`, 'success');
+    }
+  };
+
+  // HIERARCHY REPAIR: Batch Fix Hierarchy Violations with Loading Presentation
+  const handleRepairHierarchy = async () => {
+    if (records.length > 500) {
+      setLoadingState({
+        isOpen: true,
+        title: 'Perbaikan Otomatis Pelanggaran Hierarki',
+        subtitle: `Menyelaraskan Superior FL (Kolom D) dengan parent prefix Kolom A sesuai hierarki Modul ${MODULE_CONFIGS[currentModule].code}`,
+        stage: 'Menyelaraskan struktur hierarki...',
+        currentCount: 0,
+        totalCount: records.length,
+        percent: 0,
+        speedRowsPerSec: 0,
+        elapsedSeconds: 0
+      });
+
+      const { repairedRecords, totalFixedCount } = await batchRepairHierarchyAsync(
+        records,
+        currentModule,
+        (p) => {
+          setLoadingState(prev => ({
+            ...prev,
+            stage: p.stage,
+            currentCount: p.current,
+            totalCount: p.total,
+            percent: p.percent,
+            speedRowsPerSec: p.speedRowsPerSec || prev.speedRowsPerSec,
+            elapsedSeconds: p.elapsedSeconds || prev.elapsedSeconds
+          }));
+        }
+      );
+
+      setRecords(repairedRecords);
+      refreshSummary(repairedRecords);
+      setLoadingState(prev => ({ ...prev, percent: 100, stage: '✓ Penyelarasan hierarki selesai.' }));
+      setTimeout(() => {
+        setLoadingState(prev => ({ ...prev, isOpen: false }));
+        showToast(`Berhasil menyelaraskan ${totalFixedCount.toLocaleString()} baris hierarchy violation (Kolom D diselaraskan ke prefix Kolom A).`, 'success');
+      }, 400);
+    } else {
+      const { repairedRecords, totalFixedCount } = batchRepairHierarchy(records, currentModule);
+      setRecords(repairedRecords);
+      refreshSummary(repairedRecords);
+      showToast(`Berhasil menyelaraskan ${totalFixedCount} baris hierarchy violation (Kolom D diselaraskan ke prefix Kolom A).`, 'success');
+    }
   };
 
   // FUZZY MODAL: Apply Single Suggestion from Modal
@@ -185,39 +385,130 @@ export default function App() {
     showToast(`Baris #${record.rowIndex}: Nilai Kolom ${field} berhasil diperbarui.`);
   };
 
-  // BUTTON 1: Validate Plan Section
-  const handleValidatePlanSection = () => {
-    const { repairedRecords, totalRepairedCount, totalChanges } = batchRepairPlanSection(records, currentModule);
-    setRecords(repairedRecords);
-    if (totalRepairedCount > 0) {
-      showToast(
-        `Sukses Validasi 1 (${MODULE_CONFIGS[currentModule].code}): ${totalRepairedCount} baris diperbarui (${totalChanges} kolom: City ID AH, Plan Section H, Plant F/I, WC J, CC K disinkronkan).`,
-        'success'
+  // BUTTON 1: Validate Plan Section with Loading Presentation
+  const handleValidatePlanSection = async () => {
+    if (records.length > 500) {
+      setLoadingState({
+        isOpen: true,
+        title: 'Validasi & Sinkronisasi Plan Section (Langkah 1)',
+        subtitle: `Menyinkronkan City ID (AH), Plan Section (H), Plant (F/I), Work Center (J), Cost Center (K) pada ${records.length.toLocaleString()} baris`,
+        stage: 'Memulai sinkronisasi batch...',
+        currentCount: 0,
+        totalCount: records.length,
+        percent: 0,
+        speedRowsPerSec: 0,
+        elapsedSeconds: 0
+      });
+
+      const { repairedRecords, totalRepairedCount, totalChanges } = await batchRepairPlanSectionAsync(
+        records,
+        currentModule,
+        (p) => {
+          setLoadingState(prev => ({
+            ...prev,
+            stage: p.stage,
+            currentCount: p.current,
+            totalCount: p.total,
+            percent: p.percent,
+            speedRowsPerSec: p.speedRowsPerSec || prev.speedRowsPerSec,
+            elapsedSeconds: p.elapsedSeconds || prev.elapsedSeconds
+          }));
+        }
       );
+
+      setRecords(repairedRecords);
+      refreshSummary(repairedRecords);
+      setLoadingState(prev => ({ ...prev, percent: 100, stage: '✓ Sinkronisasi Langkah 1 selesai.' }));
+      setTimeout(() => {
+        setLoadingState(prev => ({ ...prev, isOpen: false }));
+        showToast(
+          `Sukses Validasi 1 (${MODULE_CONFIGS[currentModule].code}): ${totalRepairedCount.toLocaleString()} baris diperbarui (${totalChanges.toLocaleString()} perubahan kolom).`,
+          'success'
+        );
+      }, 400);
     } else {
-      showToast(`Seluruh Plan Section, Plant, Work Center, dan Cost Center sudah sesuai dengan referensi ${MODULE_CONFIGS[currentModule].shortName}.`, 'info');
+      const { repairedRecords, totalRepairedCount, totalChanges } = batchRepairPlanSection(records, currentModule);
+      setRecords(repairedRecords);
+      refreshSummary(repairedRecords);
+      if (totalRepairedCount > 0) {
+        showToast(
+          `Sukses Validasi 1 (${MODULE_CONFIGS[currentModule].code}): ${totalRepairedCount} baris diperbarui (${totalChanges} perubahan).`,
+          'success'
+        );
+      } else {
+        showToast(`Seluruh Plan Section dan hierarki sudah sesuai dengan referensi ${MODULE_CONFIGS[currentModule].shortName}.`, 'info');
+      }
     }
   };
 
-  // BUTTON 2: Validate FL 3-Digit vs Plant Section
-  const handleValidateFLVsPlantSection = () => {
-    const { repairedRecords, totalRepairedCount, mismatchCountBefore } = batchSyncFLVsPlantSection(records, currentModule);
-    if (mismatchCountBefore === 0) {
-      showToast('Pemeriksaan selesai: Semua 3-digit Plant Section (Kolom H) SUDAH SAMA dengan 3-digit Kolom A.', 'success');
-      return;
-    }
+  // BUTTON 2: Validate FL 3-Digit vs Plan Section with Loading Presentation
+  const handleValidateFLVsPlantSection = async () => {
+    if (records.length > 500) {
+      setLoadingState({
+        isOpen: true,
+        title: 'Validasi FL 3-Digit vs Plan Section (Langkah 2)',
+        subtitle: `Mencocokkan digit 6-8 Kolom A dengan Kolom H dan menyelaraskan Superior FL (Kolom D) pada ${records.length.toLocaleString()} baris`,
+        stage: 'Memulai validasi 3-digit...',
+        currentCount: 0,
+        totalCount: records.length,
+        percent: 0,
+        speedRowsPerSec: 0,
+        elapsedSeconds: 0
+      });
 
-    setRecords(repairedRecords);
-    showToast(
-      `Ditemukan ${mismatchCountBefore} baris selisih: Kolom Plant Section (H) & Superior FL (D) telah disinkronkan mengikuti Kolom A (${MODULE_CONFIGS[currentModule].code}).`,
-      'warning'
-    );
+      const { repairedRecords, totalRepairedCount, mismatchCountBefore } = await batchSyncFLVsPlantSectionAsync(
+        records,
+        currentModule,
+        (p) => {
+          setLoadingState(prev => ({
+            ...prev,
+            stage: p.stage,
+            currentCount: p.current,
+            totalCount: p.total,
+            percent: p.percent,
+            speedRowsPerSec: p.speedRowsPerSec || prev.speedRowsPerSec,
+            elapsedSeconds: p.elapsedSeconds || prev.elapsedSeconds
+          }));
+        }
+      );
+
+      setRecords(repairedRecords);
+      refreshSummary(repairedRecords);
+      setLoadingState(prev => ({ ...prev, percent: 100, stage: '✓ Validasi 3-digit selesai.' }));
+      setTimeout(() => {
+        setLoadingState(prev => ({ ...prev, isOpen: false }));
+        if (mismatchCountBefore === 0) {
+          showToast('Pemeriksaan selesai: Semua 3-digit Plant Section (Kolom H) SUDAH SAMA dengan 3-digit Kolom A.', 'success');
+        } else {
+          showToast(
+            `Ditemukan ${mismatchCountBefore.toLocaleString()} baris selisih: Kolom Plant Section (H) & Superior FL (D) telah disinkronkan mengikuti Kolom A (${MODULE_CONFIGS[currentModule].code}).`,
+            'warning'
+          );
+        }
+      }, 400);
+    } else {
+      const { repairedRecords, totalRepairedCount, mismatchCountBefore } = batchSyncFLVsPlantSection(records, currentModule);
+      if (mismatchCountBefore === 0) {
+        showToast('Pemeriksaan selesai: Semua 3-digit Plant Section (Kolom H) SUDAH SAMA dengan 3-digit Kolom A.', 'success');
+        return;
+      }
+      setRecords(repairedRecords);
+      refreshSummary(repairedRecords);
+      showToast(
+        `Ditemukan ${mismatchCountBefore} baris selisih: Kolom Plant Section (H) & Superior FL (D) telah disinkronkan mengikuti Kolom A.`,
+        'warning'
+      );
+    }
   };
 
   // Single Row: Sync Plan Section from City Name
   const handleSyncPlanSectionRow = (record: FLRowRecord) => {
     const { updatedRecord, changesMade } = repairPlanSectionFromCityName(record, currentModule);
-    setRecords(prev => prev.map(r => r.id === record.id ? updatedRecord : r));
+    setRecords(prev => {
+      const next = prev.map(r => r.id === record.id ? updatedRecord : r);
+      refreshSummary(next);
+      return next;
+    });
     if (changesMade.length > 0) {
       showToast(`Baris #${record.rowIndex}: Berhasil disinkronkan dengan referensi ${MODULE_CONFIGS[currentModule].shortName}.`);
     } else {
@@ -228,7 +519,11 @@ export default function App() {
   // Single Row: Sync Plant Section with FL 3-digit
   const handleSyncFLDigitRow = (record: FLRowRecord) => {
     const { updatedRecord, changesMade } = syncPlantSectionWithFLCode(record, currentModule);
-    setRecords(prev => prev.map(r => r.id === record.id ? updatedRecord : r));
+    setRecords(prev => {
+      const next = prev.map(r => r.id === record.id ? updatedRecord : r);
+      refreshSummary(next);
+      return next;
+    });
     const flDigit = extractDigit6to8(record.data.functionalLocation);
     if (changesMade.length > 0) {
       showToast(`Baris #${record.rowIndex}: Plant Section (Kolom H) disamakan dengan '${flDigit}' dari Kolom A.`);
@@ -240,7 +535,11 @@ export default function App() {
   // Repair single row
   const handleRepairRow = (record: FLRowRecord) => {
     const { updatedRecord, changesMade } = autoRepairRow(record, currentModule);
-    setRecords(prev => prev.map(r => r.id === record.id ? updatedRecord : r));
+    setRecords(prev => {
+      const next = prev.map(r => r.id === record.id ? updatedRecord : r);
+      refreshSummary(next);
+      return next;
+    });
     showToast(`Baris #${record.rowIndex} berhasil diperbaiki (${changesMade.length} kolom disinkronkan).`);
   };
 
@@ -248,13 +547,18 @@ export default function App() {
   const handleRepairAll = () => {
     const { repairedRecords, totalRepairedCount, totalChanges } = autoRepairAll(records, currentModule);
     setRecords(repairedRecords);
+    refreshSummary(repairedRecords);
     showToast(`Berhasil memperbaiki ${totalRepairedCount} baris data (${totalChanges} perubahan diterapkan).`);
   };
 
   // Reset single row
   const handleResetRow = (record: FLRowRecord) => {
     const reset = resetRecord(record, currentModule);
-    setRecords(prev => prev.map(r => r.id === record.id ? reset : r));
+    setRecords(prev => {
+      const next = prev.map(r => r.id === record.id ? reset : r);
+      refreshSummary(next);
+      return next;
+    });
     showToast(`Baris #${record.rowIndex} dikembalikan ke data awal.`, 'info');
   };
 
@@ -265,11 +569,49 @@ export default function App() {
   };
 
   // File Upload
-  const handleDataLoaded = (newRecords: FLRowRecord[]) => {
-    // Revalidate under current module
-    const { records: finalRecords } = validateAllRows(newRecords, currentModule);
-    setRecords(finalRecords);
-    showToast(`${newRecords.length} baris data berhasil diimpor dan divalidasi dengan modul ${MODULE_CONFIGS[currentModule].code}.`);
+  const handleDataLoaded = async (newRecords: FLRowRecord[]) => {
+    if (newRecords.length > 500) {
+      setLoadingState({
+        isOpen: true,
+        title: 'Memvalidasi Data Hasil Impor',
+        subtitle: `Memvalidasi ${newRecords.length.toLocaleString()} baris data sesuai standar modul ${MODULE_CONFIGS[currentModule].code}`,
+        stage: 'Memvalidasi baris data...',
+        currentCount: 0,
+        totalCount: newRecords.length,
+        percent: 0,
+        speedRowsPerSec: 0,
+        elapsedSeconds: 0
+      });
+
+      const { records: finalRecords, summary: newSummary } = await validateAllRowsAsync(
+        newRecords,
+        currentModule,
+        (p) => {
+          setLoadingState(prev => ({
+            ...prev,
+            stage: p.stage,
+            currentCount: p.current,
+            totalCount: p.total,
+            percent: p.percent,
+            speedRowsPerSec: p.speedRowsPerSec || prev.speedRowsPerSec,
+            elapsedSeconds: p.elapsedSeconds || prev.elapsedSeconds
+          }));
+        }
+      );
+
+      setRecords(finalRecords);
+      setSummary(newSummary);
+      setLoadingState(prev => ({ ...prev, percent: 100, stage: '✓ Selesai!' }));
+      setTimeout(() => {
+        setLoadingState(prev => ({ ...prev, isOpen: false }));
+        showToast(`${newRecords.length.toLocaleString()} baris data berhasil diimpor dan divalidasi dengan modul ${MODULE_CONFIGS[currentModule].code}.`);
+      }, 400);
+    } else {
+      const { records: finalRecords, summary: newSummary } = validateAllRows(newRecords, currentModule);
+      setRecords(finalRecords);
+      setSummary(newSummary);
+      showToast(`${newRecords.length} baris data berhasil diimpor dan divalidasi dengan modul ${MODULE_CONFIGS[currentModule].code}.`);
+    }
   };
 
   // Filter records
@@ -340,101 +682,93 @@ export default function App() {
               flMismatchCount={flMismatchCount}
               typoCityCount={typoCityCount}
               onFixAllTypos={handleFixAllTypos}
-              onOpenExportModal={() => setIsExportModalOpen(true)}
+              onFilterToDuplicate={() => setStatusFilter('DUPLICATE')}
+              onRepairHierarchy={handleRepairHierarchy}
               module={currentModule}
               onOpenFuzzyModal={() => setIsFuzzyModalOpen(true)}
             />
 
-            {/* Clean Data Grid Toolbar */}
+            {/* Clean Data Grid Toolbar matching mockup */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
-              {/* Segmented Filter Control */}
-              <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg text-xs font-medium">
+              {/* Segmented Filter Pills */}
+              <div className="flex items-center gap-1 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
                 <button
                   onClick={() => setStatusFilter('ALL')}
-                  className={`px-3 py-1.5 rounded-md transition-colors ${
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors shrink-0 cursor-pointer ${
                     statusFilter === 'ALL'
-                      ? 'bg-white text-slate-900 shadow-2xs font-semibold'
-                      : 'text-slate-600 hover:text-slate-900'
+                      ? 'bg-slate-900 text-white shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
                   }`}
                 >
-                  Semua Data ({records.length})
+                  Semua {records.length}
                 </button>
 
                 <button
                   onClick={() => setStatusFilter('ERROR')}
-                  className={`px-3 py-1.5 rounded-md transition-colors ${
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors shrink-0 cursor-pointer ${
                     statusFilter === 'ERROR'
-                      ? 'bg-white text-rose-700 shadow-2xs font-semibold'
-                      : 'text-slate-600 hover:text-slate-900'
+                      ? 'bg-slate-900 text-white shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
                   }`}
                 >
-                  Hanya Masalah ({summary.errorRows})
+                  Bermasalah {summary.errorRows}
                 </button>
 
                 {summary.duplicateRows > 0 && (
                   <button
                     onClick={() => setStatusFilter('DUPLICATE')}
-                    className={`px-3 py-1.5 rounded-md transition-colors ${
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors shrink-0 cursor-pointer ${
                       statusFilter === 'DUPLICATE'
-                        ? 'bg-white text-rose-900 shadow-2xs font-bold'
-                        : 'text-rose-700 hover:text-rose-900 bg-rose-50/60'
+                        ? 'bg-slate-900 text-white shadow-2xs'
+                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
                     }`}
                   >
-                    Duplikat PK ({summary.duplicateRows})
+                    Duplikat {summary.duplicateRows}
                   </button>
                 )}
 
                 <button
                   onClick={() => setStatusFilter('VALID')}
-                  className={`px-3 py-1.5 rounded-md transition-colors ${
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors shrink-0 cursor-pointer ${
                     statusFilter === 'VALID'
-                      ? 'bg-white text-emerald-700 shadow-2xs font-semibold'
-                      : 'text-slate-600 hover:text-slate-900'
+                      ? 'bg-slate-900 text-white shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
                   }`}
                 >
-                  Sudah Valid ({summary.validRows})
+                  Valid {summary.validRows}
                 </button>
 
                 <button
                   onClick={() => setStatusFilter('REPAIRED')}
-                  className={`px-3 py-1.5 rounded-md transition-colors ${
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors shrink-0 cursor-pointer ${
                     statusFilter === 'REPAIRED'
-                      ? 'bg-white text-blue-700 shadow-2xs font-semibold'
-                      : 'text-slate-600 hover:text-slate-900'
+                      ? 'bg-slate-900 text-white shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
                   }`}
                 >
-                  Telah Diperbaiki ({summary.repairedRows})
+                  Diperbaiki {summary.repairedRows}
                 </button>
               </div>
 
-              {/* Search & Export Buttons */}
+              {/* Search & Audit Log Button */}
               <div className="flex items-center gap-2">
                 <div className="relative">
                   <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
                   <input
                     type="text"
-                    placeholder="Cari FL / Kota / ID..."
+                    placeholder="Cari FL, kota, atau ID"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="text-xs pl-8 pr-3 py-1.5 border border-slate-300 rounded-md bg-white w-48 sm:w-64 focus:outline-none focus:ring-1 focus:ring-slate-900"
+                    className="text-xs pl-8 pr-3 py-1.5 border border-slate-200 rounded-lg bg-white w-48 sm:w-60 focus:outline-none focus:ring-1 focus:ring-slate-900 placeholder:text-slate-400 shadow-2xs"
                   />
                 </div>
 
                 <button
-                  onClick={() => setIsExportModalOpen(true)}
-                  className="px-2.5 py-1.5 text-xs text-slate-700 hover:text-slate-900 bg-white border border-slate-300 rounded-md transition-colors whitespace-nowrap flex items-center gap-1.5 font-medium cursor-pointer shrink-0 shadow-2xs"
-                  title="Buka pilihan ekspor terpisah (Data Bersih, Data Bermasalah, Semua Data, Laporan Audit)"
-                >
-                  <Download className="w-3.5 h-3.5 text-slate-500" />
-                  <span>Ekspor (;)</span>
-                </button>
-
-                <button
                   onClick={handleExportAuditReport}
-                  className="px-2.5 py-1.5 text-xs text-slate-600 hover:text-slate-900 bg-white border border-slate-300 rounded-md transition-colors whitespace-nowrap cursor-pointer shrink-0"
+                  className="px-3 py-1.5 text-xs text-slate-700 hover:text-slate-900 bg-white border border-slate-200 rounded-lg transition-colors whitespace-nowrap cursor-pointer shrink-0 font-medium shadow-2xs hover:bg-slate-50"
                   title="Unduh rekapan temuan audit CSV (;)"
                 >
-                  Log Audit (;)
+                  Log audit
                 </button>
               </div>
             </div>
@@ -491,6 +825,8 @@ export default function App() {
         isOpen={isUploadModalOpen}
         onClose={() => setIsUploadModalOpen(false)}
         onDataLoaded={handleDataLoaded}
+        onStartStreamingFile={handleStartStreamingFile}
+        module={currentModule}
       />
 
       {/* Opsi Ekspor Terpisah Modal */}
@@ -499,6 +835,12 @@ export default function App() {
         onClose={() => setIsExportModalOpen(false)}
         records={records}
         onShowToast={showToast}
+      />
+
+      {/* Presentation-Style Running Indicator Modal for Upload & Large Batch Validations */}
+      <LoadingPresentationModal
+        {...loadingState}
+        onCancel={() => setLoadingState(prev => ({ ...prev, isOpen: false }))}
       />
     </div>
   );

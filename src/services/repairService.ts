@@ -373,6 +373,28 @@ export function batchApplyAllFuzzyTypoSuggestions(records: FLRowRecord[], module
 }
 
 /**
+ * Batch repair all hierarchy violation issues across all records
+ */
+export function batchRepairHierarchy(records: FLRowRecord[], module: FunclocModule = 'ZFS04'): {
+  repairedRecords: FLRowRecord[];
+  totalFixedCount: number;
+} {
+  let totalFixedCount = 0;
+  const repairedRecords = records.map(record => {
+    const hasHierarchyIssue = record.issues.some(i => i.rule === 'RULE_HIERARCHY_VIOLATION');
+    if (hasHierarchyIssue) {
+      const { updatedRecord, changesMade } = autoRepairRow(record, module);
+      if (changesMade.length > 0) {
+        totalFixedCount++;
+        return updatedRecord;
+      }
+    }
+    return record;
+  });
+  return { repairedRecords, totalFixedCount };
+}
+
+/**
  * Resets record to original
  */
 export function resetRecord(record: FLRowRecord, module: FunclocModule = 'ZFS04'): FLRowRecord {
@@ -380,4 +402,214 @@ export function resetRecord(record: FLRowRecord, module: FunclocModule = 'ZFS04'
   reset.module = module;
   return reset;
 }
+
+export interface BatchRepairProgress {
+  stage: string;
+  current: number;
+  total: number;
+  percent: number;
+  speedRowsPerSec?: number;
+  elapsedSeconds?: number;
+}
+
+/**
+ * Async chunked batch repair for Button 1 (Validate Plan Section)
+ */
+export async function batchRepairPlanSectionAsync(
+  records: FLRowRecord[], 
+  module: FunclocModule = 'ZFS04',
+  onProgress?: (p: BatchRepairProgress) => void,
+  batchSize = 5000
+): Promise<{ repairedRecords: FLRowRecord[]; totalRepairedCount: number; totalChanges: number }> {
+  const startTime = performance.now();
+  const total = records.length;
+  let totalChanges = 0;
+  let totalRepairedCount = 0;
+  const repairedRecords: FLRowRecord[] = new Array(total);
+
+  for (let offset = 0; offset < total; offset += batchSize) {
+    const end = Math.min(offset + batchSize, total);
+
+    for (let idx = offset; idx < end; idx++) {
+      const record = records[idx];
+      const { updatedRecord, changesMade } = repairPlanSectionFromCityName(record, module);
+      if (changesMade.length > 0) {
+        totalChanges += changesMade.length;
+        totalRepairedCount++;
+      }
+      repairedRecords[idx] = updatedRecord;
+    }
+
+    const elapsedMs = Math.max(1, performance.now() - startTime);
+    const speed = Math.round(end / (elapsedMs / 1000));
+    const percent = Math.min(100, Math.round((end / total) * 100));
+
+    onProgress?.({
+      stage: `Menyinkronkan City ID & Plan Section baris ${offset.toLocaleString()} - ${end.toLocaleString()}...`,
+      current: end,
+      total,
+      percent,
+      speedRowsPerSec: speed,
+      elapsedSeconds: Math.round(elapsedMs / 100) / 10
+    });
+
+    await new Promise(r => setTimeout(r, 0));
+  }
+
+  return { repairedRecords, totalRepairedCount, totalChanges };
+}
+
+/**
+ * Async chunked batch sync for Button 2 (Validate FL 3-Digit vs Plan Section)
+ */
+export async function batchSyncFLVsPlantSectionAsync(
+  records: FLRowRecord[], 
+  module: FunclocModule = 'ZFS04',
+  onProgress?: (p: BatchRepairProgress) => void,
+  batchSize = 5000
+): Promise<{ repairedRecords: FLRowRecord[]; totalRepairedCount: number; totalChanges: number; mismatchCountBefore: number }> {
+  const startTime = performance.now();
+  const total = records.length;
+  let totalChanges = 0;
+  let totalRepairedCount = 0;
+  let mismatchCountBefore = 0;
+
+  records.forEach(r => {
+    const digit6to8 = extractDigit6to8(r.data.functionalLocation);
+    if (digit6to8 && r.data.plantSection !== digit6to8) {
+      mismatchCountBefore++;
+    }
+  });
+
+  const repairedRecords: FLRowRecord[] = new Array(total);
+
+  for (let offset = 0; offset < total; offset += batchSize) {
+    const end = Math.min(offset + batchSize, total);
+
+    for (let idx = offset; idx < end; idx++) {
+      const record = records[idx];
+      const { updatedRecord, changesMade } = syncPlantSectionWithFLCode(record, module);
+      if (changesMade.length > 0) {
+        totalChanges += changesMade.length;
+        totalRepairedCount++;
+      }
+      repairedRecords[idx] = updatedRecord;
+    }
+
+    const elapsedMs = Math.max(1, performance.now() - startTime);
+    const speed = Math.round(end / (elapsedMs / 1000));
+    const percent = Math.min(100, Math.round((end / total) * 100));
+
+    onProgress?.({
+      stage: `Mencocokkan 3-digit FL Kolom A dengan Plan Section baris ${offset.toLocaleString()} - ${end.toLocaleString()}...`,
+      current: end,
+      total,
+      percent,
+      speedRowsPerSec: speed,
+      elapsedSeconds: Math.round(elapsedMs / 100) / 10
+    });
+
+    await new Promise(r => setTimeout(r, 0));
+  }
+
+  return { repairedRecords, totalRepairedCount, totalChanges, mismatchCountBefore };
+}
+
+/**
+ * Async chunked batch fix for all typos
+ */
+export async function batchApplyAllFuzzyTypoSuggestionsAsync(
+  records: FLRowRecord[], 
+  module: FunclocModule = 'ZFS04',
+  onProgress?: (p: BatchRepairProgress) => void,
+  batchSize = 5000
+): Promise<{ repairedRecords: FLRowRecord[]; totalFixedCount: number }> {
+  const startTime = performance.now();
+  const total = records.length;
+  let totalFixedCount = 0;
+  const repairedRecords: FLRowRecord[] = new Array(total);
+
+  for (let offset = 0; offset < total; offset += batchSize) {
+    const end = Math.min(offset + batchSize, total);
+
+    for (let idx = offset; idx < end; idx++) {
+      const record = records[idx];
+      if (record.fuzzyCitySuggestion) {
+        const { updatedRecord } = applyFuzzyCitySuggestion(record, module);
+        totalFixedCount++;
+        repairedRecords[idx] = updatedRecord;
+      } else {
+        repairedRecords[idx] = record;
+      }
+    }
+
+    const elapsedMs = Math.max(1, performance.now() - startTime);
+    const speed = Math.round(end / (elapsedMs / 1000));
+    const percent = Math.min(100, Math.round((end / total) * 100));
+
+    onProgress?.({
+      stage: `Memperbaiki typo nama kota baris ${offset.toLocaleString()} - ${end.toLocaleString()}...`,
+      current: end,
+      total,
+      percent,
+      speedRowsPerSec: speed,
+      elapsedSeconds: Math.round(elapsedMs / 100) / 10
+    });
+
+    await new Promise(r => setTimeout(r, 0));
+  }
+
+  return { repairedRecords, totalFixedCount };
+}
+
+/**
+ * Async chunked batch fix for all hierarchy violations
+ */
+export async function batchRepairHierarchyAsync(
+  records: FLRowRecord[], 
+  module: FunclocModule = 'ZFS04',
+  onProgress?: (p: BatchRepairProgress) => void,
+  batchSize = 5000
+): Promise<{ repairedRecords: FLRowRecord[]; totalFixedCount: number }> {
+  const startTime = performance.now();
+  const total = records.length;
+  let totalFixedCount = 0;
+  const repairedRecords: FLRowRecord[] = new Array(total);
+
+  for (let offset = 0; offset < total; offset += batchSize) {
+    const end = Math.min(offset + batchSize, total);
+
+    for (let idx = offset; idx < end; idx++) {
+      const record = records[idx];
+      const hasHierarchyIssue = record.issues.some(i => i.rule === 'RULE_HIERARCHY_VIOLATION');
+      if (hasHierarchyIssue) {
+        const { updatedRecord, changesMade } = autoRepairRow(record, module);
+        if (changesMade.length > 0) {
+          totalFixedCount++;
+          repairedRecords[idx] = updatedRecord;
+          continue;
+        }
+      }
+      repairedRecords[idx] = record;
+    }
+
+    const elapsedMs = Math.max(1, performance.now() - startTime);
+    const speed = Math.round(end / (elapsedMs / 1000));
+    const percent = Math.min(100, Math.round((end / total) * 100));
+
+    onProgress?.({
+      stage: `Menyelaraskan parent hierarchy Kolom D ↔ A baris ${offset.toLocaleString()} - ${end.toLocaleString()}...`,
+      current: end,
+      total,
+      percent,
+      speedRowsPerSec: speed,
+      elapsedSeconds: Math.round(elapsedMs / 100) / 10
+    });
+
+    await new Promise(r => setTimeout(r, 0));
+  }
+
+  return { repairedRecords, totalFixedCount };
+}
+
 

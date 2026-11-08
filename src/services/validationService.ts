@@ -155,6 +155,29 @@ export function validateCoordinate(rawCoord: string): {
  * Validates a single row against all SAP PM Functional Location rules
  * NOTE: Column A (Functional Location) is strictly IMMUTABLE PRIMARY KEY.
  */
+// High-performance In-Memory Cache for City & Fuzzy Lookups (Prevents redundant Levenshtein operations on 100k+ rows)
+const cityLookupCache = new Map<string, {
+  item?: {
+    cityName: string;
+    cityId: string;
+    plant: string;
+    workCenter: string;
+    costCenter: string;
+    source: 'SNI' | 'ZFS04';
+  };
+  fuzzySuggestion?: {
+    cityHomepass: string;
+    cityId: string;
+    similarity: number;
+    confidence: 'HIGH' | 'MEDIUM' | 'LOW';
+    sourceTable: 'SNI' | 'ZFS04';
+  };
+}>();
+
+export function clearCityLookupCache(): void {
+  cityLookupCache.clear();
+}
+
 /**
  * Looks up city in the appropriate reference database based on active module.
  * In ZFS01-NBB: Prioritizes SNI Master Database (424 items), fallback to ZFS04 LOV.
@@ -179,12 +202,33 @@ export function lookupCityReference(cityName: string, module: FunclocModule = 'Z
 } {
   if (!cityName || !cityName.trim()) return {};
   const trimmed = cityName.trim();
+  const cacheKey = `${module}:${trimmed.toUpperCase()}`;
+  const cached = cityLookupCache.get(cacheKey);
+  if (cached) return cached;
+
+  let result: {
+    item?: {
+      cityName: string;
+      cityId: string;
+      plant: string;
+      workCenter: string;
+      costCenter: string;
+      source: 'SNI' | 'ZFS04';
+    };
+    fuzzySuggestion?: {
+      cityHomepass: string;
+      cityId: string;
+      similarity: number;
+      confidence: 'HIGH' | 'MEDIUM' | 'LOW';
+      sourceTable: 'SNI' | 'ZFS04';
+    };
+  } = {};
 
   if (module === 'ZFS01') {
     // 1. Check SNI Database first
     const sni = findSniByCityName(trimmed);
     if (sni) {
-      return {
+      result = {
         item: {
           cityName: sni.citySni,
           cityId: sni.cityId,
@@ -194,53 +238,56 @@ export function lookupCityReference(cityName: string, module: FunclocModule = 'Z
           source: 'SNI'
         }
       };
-    }
-    // 2. Check ZFS04 LOV as fallback
-    const lov = findLovByCityName(trimmed);
-    if (lov) {
-      return {
-        item: {
-          cityName: lov.cityHomepass,
-          cityId: lov.cityId,
-          plant: lov.plant,
-          workCenter: lov.workCenter,
-          costCenter: lov.costCenter,
-          source: 'ZFS04'
+    } else {
+      // 2. Check ZFS04 LOV as fallback
+      const lov = findLovByCityName(trimmed);
+      if (lov) {
+        result = {
+          item: {
+            cityName: lov.cityHomepass,
+            cityId: lov.cityId,
+            plant: lov.plant,
+            workCenter: lov.workCenter,
+            costCenter: lov.costCenter,
+            source: 'ZFS04'
+          }
+        };
+      } else {
+        // 3. Fuzzy match in SNI
+        const fuzzySni = fuzzyMatchSniCityName(trimmed);
+        if (fuzzySni && fuzzySni.similarity >= 0.55) {
+          result = {
+            fuzzySuggestion: {
+              cityHomepass: fuzzySni.sniItem.citySni,
+              cityId: fuzzySni.sniItem.cityId,
+              similarity: fuzzySni.similarity,
+              confidence: fuzzySni.confidence,
+              sourceTable: 'SNI'
+            }
+          };
+        } else {
+          // 4. Fuzzy match in LOV
+          const fuzzyLov = fuzzyMatchCityName(trimmed);
+          if (fuzzyLov && fuzzyLov.similarity >= 0.55) {
+            result = {
+              fuzzySuggestion: {
+                cityHomepass: fuzzyLov.lovItem.cityHomepass,
+                cityId: fuzzyLov.lovItem.cityId,
+                similarity: fuzzyLov.similarity,
+                confidence: fuzzyLov.confidence,
+                sourceTable: 'ZFS04'
+              }
+            };
+          }
         }
-      };
-    }
-    // 3. Fuzzy match in SNI
-    const fuzzySni = fuzzyMatchSniCityName(trimmed);
-    if (fuzzySni && fuzzySni.similarity >= 0.55) {
-      return {
-        fuzzySuggestion: {
-          cityHomepass: fuzzySni.sniItem.citySni,
-          cityId: fuzzySni.sniItem.cityId,
-          similarity: fuzzySni.similarity,
-          confidence: fuzzySni.confidence,
-          sourceTable: 'SNI'
-        }
-      };
-    }
-    // 4. Fuzzy match in LOV
-    const fuzzyLov = fuzzyMatchCityName(trimmed);
-    if (fuzzyLov && fuzzyLov.similarity >= 0.55) {
-      return {
-        fuzzySuggestion: {
-          cityHomepass: fuzzyLov.lovItem.cityHomepass,
-          cityId: fuzzyLov.lovItem.cityId,
-          similarity: fuzzyLov.similarity,
-          confidence: fuzzyLov.confidence,
-          sourceTable: 'ZFS04'
-        }
-      };
+      }
     }
   } else {
     // ZFS04 module
     // 1. Check LOV Database first
     const lov = findLovByCityName(trimmed);
     if (lov) {
-      return {
+      result = {
         item: {
           cityName: lov.cityHomepass,
           cityId: lov.cityId,
@@ -250,50 +297,54 @@ export function lookupCityReference(cityName: string, module: FunclocModule = 'Z
           source: 'ZFS04'
         }
       };
-    }
-    // 2. Check SNI Database as fallback
-    const sni = findSniByCityName(trimmed);
-    if (sni) {
-      return {
-        item: {
-          cityName: sni.citySni,
-          cityId: sni.cityId,
-          plant: sni.plant,
-          workCenter: sni.workCenter,
-          costCenter: sni.costCenter,
-          source: 'SNI'
+    } else {
+      // 2. Check SNI Database as fallback
+      const sni = findSniByCityName(trimmed);
+      if (sni) {
+        result = {
+          item: {
+            cityName: sni.citySni,
+            cityId: sni.cityId,
+            plant: sni.plant,
+            workCenter: sni.workCenter,
+            costCenter: sni.costCenter,
+            source: 'SNI'
+          }
+        };
+      } else {
+        // 3. Fuzzy match in LOV
+        const fuzzyLov = fuzzyMatchCityName(trimmed);
+        if (fuzzyLov && fuzzyLov.similarity >= 0.55) {
+          result = {
+            fuzzySuggestion: {
+              cityHomepass: fuzzyLov.lovItem.cityHomepass,
+              cityId: fuzzyLov.lovItem.cityId,
+              similarity: fuzzyLov.similarity,
+              confidence: fuzzyLov.confidence,
+              sourceTable: 'ZFS04'
+            }
+          };
+        } else {
+          // 4. Fuzzy match in SNI
+          const fuzzySni = fuzzyMatchSniCityName(trimmed);
+          if (fuzzySni && fuzzySni.similarity >= 0.55) {
+            result = {
+              fuzzySuggestion: {
+                cityHomepass: fuzzySni.sniItem.citySni,
+                cityId: fuzzySni.sniItem.cityId,
+                similarity: fuzzySni.similarity,
+                confidence: fuzzySni.confidence,
+                sourceTable: 'SNI'
+              }
+            };
+          }
         }
-      };
-    }
-    // 3. Fuzzy match in LOV
-    const fuzzyLov = fuzzyMatchCityName(trimmed);
-    if (fuzzyLov && fuzzyLov.similarity >= 0.55) {
-      return {
-        fuzzySuggestion: {
-          cityHomepass: fuzzyLov.lovItem.cityHomepass,
-          cityId: fuzzyLov.lovItem.cityId,
-          similarity: fuzzyLov.similarity,
-          confidence: fuzzyLov.confidence,
-          sourceTable: 'ZFS04'
-        }
-      };
-    }
-    // 4. Fuzzy match in SNI
-    const fuzzySni = fuzzyMatchSniCityName(trimmed);
-    if (fuzzySni && fuzzySni.similarity >= 0.55) {
-      return {
-        fuzzySuggestion: {
-          cityHomepass: fuzzySni.sniItem.citySni,
-          cityId: fuzzySni.sniItem.cityId,
-          similarity: fuzzySni.similarity,
-          confidence: fuzzySni.confidence,
-          sourceTable: 'SNI'
-        }
-      };
+      }
     }
   }
 
-  return {};
+  cityLookupCache.set(cacheKey, result);
+  return result;
 }
 
 /**
@@ -761,6 +812,190 @@ export function validateAllRows(rows: FLRowRecord[], module: FunclocModule = 'ZF
 
   const summary: ValidationSummary = {
     totalRows: rows.length,
+    validRows,
+    errorRows,
+    warningRows,
+    repairedRows,
+    duplicateRows,
+    ruleStats
+  };
+
+  return { records, summary };
+}
+
+export interface ValidationProgressInfo {
+  stage: string;
+  current: number;
+  total: number;
+  percent: number;
+  speedRowsPerSec?: number;
+  elapsedSeconds?: number;
+}
+
+/**
+ * Asynchronously validates hundreds of thousands of rows in non-blocking batches.
+ * Yields control to the main UI thread via setTimeout(0) between batches so the UI
+ * presentation progress indicator remains 60fps smooth without page lockup.
+ */
+export async function validateAllRowsAsync(
+  rows: FLRowRecord[], 
+  module: FunclocModule = 'ZFS04',
+  onProgress?: (info: ValidationProgressInfo) => void,
+  batchSize = 5000
+): Promise<{ records: FLRowRecord[]; summary: ValidationSummary }> {
+  const startTime = performance.now();
+  const total = rows.length;
+
+  if (total === 0) {
+    return {
+      records: [],
+      summary: {
+        totalRows: 0,
+        validRows: 0,
+        errorRows: 0,
+        warningRows: 0,
+        repairedRows: 0,
+        duplicateRows: 0,
+        ruleStats: {
+          ruleDuplicatePk: 0,
+          ruleHierarchyViolation: 0,
+          rule1SuperiorMismatch: 0,
+          rule2DigitMismatch: 0,
+          rule3CityIdMissingOrInvalid: 0,
+          rule4PlanSyncIssues: 0,
+          rule5HierarchyInconsistency: 0,
+          rule6LengthExceeded: 0,
+          rule8CoordinateIssues: 0,
+        }
+      }
+    };
+  }
+
+  onProgress?.({
+    stage: 'Mengindeks keunikan Primary Key (Kolom A)...',
+    current: 0,
+    total,
+    percent: 5,
+    elapsedSeconds: 0
+  });
+
+  // 1. Build Frequency Map for Column A (Functional Location - Primary Key)
+  const flOccurrences = new Map<string, number[]>();
+  rows.forEach((r, idx) => {
+    const rawFl = (r.data.functionalLocation || '').trim().toUpperCase();
+    if (rawFl) {
+      const existing = flOccurrences.get(rawFl) || [];
+      existing.push(idx + 1);
+      flOccurrences.set(rawFl, existing);
+    }
+  });
+
+  let validRows = 0;
+  let errorRows = 0;
+  let warningRows = 0;
+  let repairedRows = 0;
+  let duplicateRows = 0;
+
+  const ruleStats = {
+    ruleDuplicatePk: 0,
+    ruleHierarchyViolation: 0,
+    rule1SuperiorMismatch: 0,
+    rule2DigitMismatch: 0,
+    rule3CityIdMissingOrInvalid: 0,
+    rule4PlanSyncIssues: 0,
+    rule5HierarchyInconsistency: 0,
+    rule6LengthExceeded: 0,
+    rule8CoordinateIssues: 0,
+  };
+
+  const records: FLRowRecord[] = new Array(total);
+
+  // 2. Validate in chunks
+  for (let offset = 0; offset < total; offset += batchSize) {
+    const end = Math.min(offset + batchSize, total);
+
+    for (let idx = offset; idx < end; idx++) {
+      const record = rows[idx];
+      const validated = validateFLRow(record.data, idx + 1, record.id, record.originalData, module);
+      validated.module = module;
+      const rawFl = (validated.data.functionalLocation || '').trim().toUpperCase();
+
+      if (rawFl) {
+        const allRowsWithThisFl = flOccurrences.get(rawFl) || [];
+        if (allRowsWithThisFl.length > 1) {
+          const otherRows = allRowsWithThisFl.filter(rNum => rNum !== idx + 1);
+          validated.isDuplicatePk = true;
+          validated.duplicateWithRows = otherRows;
+          validated.issues.unshift({
+            id: `${validated.id}_duplicate_pk`,
+            rule: 'RULE_DUPLICATE_PK',
+            field: 'functionalLocation',
+            columnLetter: 'A',
+            severity: 'error',
+            message: `Duplikasi Primary Key! Kode FL sama dengan Baris #${otherRows.join(', #')}. Di SAP PM, kode FL wajib unik.`,
+            canAutoFix: false
+          });
+          validated.hasErrors = true;
+          duplicateRows++;
+          ruleStats.ruleDuplicatePk++;
+        }
+      }
+
+      if (validated.hasErrors) {
+        errorRows++;
+      } else if (validated.hasWarnings) {
+        warningRows++;
+      } else {
+        validRows++;
+      }
+
+      if (validated.isRepaired) {
+        repairedRows++;
+      }
+
+      validated.issues.forEach(issue => {
+        if (issue.rule === 'RULE_HIERARCHY_VIOLATION') ruleStats.ruleHierarchyViolation++;
+        if (issue.rule === 'RULE_1_SUPERIOR_FL') ruleStats.rule1SuperiorMismatch++;
+        if (issue.rule === 'RULE_2_DIGIT_6_8_VS_PLAN') ruleStats.rule2DigitMismatch++;
+        if (issue.rule === 'RULE_3_CITY_NAME_TO_CITY_ID') ruleStats.rule3CityIdMissingOrInvalid++;
+        if (issue.rule === 'RULE_4_PLAN_SECTION_SYNC') ruleStats.rule4PlanSyncIssues++;
+        if (issue.rule === 'RULE_5_SAP_HIERARCHY') ruleStats.rule5HierarchyInconsistency++;
+        if (issue.rule === 'RULE_6_CHAR_LENGTH') ruleStats.rule6LengthExceeded++;
+        if (issue.rule === 'RULE_8_COORDINATES') ruleStats.rule8CoordinateIssues++;
+      });
+
+      records[idx] = validated;
+    }
+
+    const elapsedMs = Math.max(1, performance.now() - startTime);
+    const speed = Math.round((end / (elapsedMs / 1000)));
+    const percent = Math.min(99, 10 + Math.round((end / total) * 88));
+
+    onProgress?.({
+      stage: `Memvalidasi batch baris ${offset.toLocaleString()} - ${end.toLocaleString()}...`,
+      current: end,
+      total,
+      percent,
+      speedRowsPerSec: speed,
+      elapsedSeconds: Math.round(elapsedMs / 100) / 10
+    });
+
+    // Yield control so browser UI repaints and does not show unresponsive dialog
+    await new Promise(r => setTimeout(r, 0));
+  }
+
+  const elapsedTotal = (performance.now() - startTime) / 1000;
+  onProgress?.({
+    stage: 'Selesai memvalidasi seluruh baris data.',
+    current: total,
+    total,
+    percent: 100,
+    speedRowsPerSec: Math.round(total / Math.max(0.1, elapsedTotal)),
+    elapsedSeconds: Math.round(elapsedTotal * 10) / 10
+  });
+
+  const summary: ValidationSummary = {
+    totalRows: total,
     validRows,
     errorRows,
     warningRows,
