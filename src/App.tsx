@@ -9,7 +9,10 @@ import { UploadModal } from './components/UploadModal';
 import { ExportModal } from './components/ExportModal';
 import { ReferenceFuzzyModal } from './components/ReferenceFuzzyModal';
 import { LoadingPresentationModal } from './components/LoadingPresentationModal';
+import { FunctionalLocationGenerator } from './components/FunctionalLocationGenerator';
+import { EquipmentWorkspace } from './components/EquipmentWorkspace';
 import { FLRowRecord, FunclocModule, MODULE_CONFIGS, FLRowData, ValidationSummary } from './types/flTypes';
+import { EAMDomain, EAMOperationMode, EquipmentCategory } from './types/eamTypes';
 import { getSampleRecords } from './data/sampleDataset';
 import { validateAllRows, validateFLRow, extractDigit6to8, validateAllRowsAsync } from './services/validationService';
 import { 
@@ -36,6 +39,11 @@ import {
 } from 'lucide-react';
 
 export default function App() {
+  // Top-level SAP EAM Domain: Functional Location vs Equipment
+  const [activeDomain, setActiveDomain] = useState<EAMDomain>('functional_location');
+  const [operationMode, setOperationMode] = useState<EAMOperationMode>('validate');
+  const [activeEquipmentCategory, setActiveEquipmentCategory] = useState<EquipmentCategory>('cable');
+
   // Current active structure module: ZFS01 (NonBroadband) or ZFS04 (OSP/Broadband)
   const [currentModule, setCurrentModule] = useState<FunclocModule>('ZFS01');
   const [records, setRecords] = useState<FLRowRecord[]>(() => getSampleRecords('ZFS01'));
@@ -152,13 +160,17 @@ export default function App() {
     }
   };
 
-  // Load sample dataset for active module
+  // Load sample dataset for active domain/module
   const handleLoadSample = () => {
-    const samples = getSampleRecords(currentModule);
-    const { records: val, summary: s } = validateAllRows(samples, currentModule);
-    setRecords(val);
-    setSummary(s);
-    showToast(`Data sampel migrasi ${MODULE_CONFIGS[currentModule].code} berhasil dimuat.`);
+    if (activeDomain === 'functional_location') {
+      const samples = getSampleRecords(currentModule);
+      const { records: val, summary: s } = validateAllRows(samples, currentModule);
+      setRecords(val);
+      setSummary(s);
+      showToast(`Data sampel migrasi Functional Location ${MODULE_CONFIGS[currentModule].code} berhasil dimuat.`);
+    } else {
+      showToast(`Data sampel Equipment ${activeEquipmentCategory.toUpperCase()} berhasil dimuat ulang.`);
+    }
   };
 
   // High-performance streaming file upload handler (handles 100,000+ rows smoothly)
@@ -638,18 +650,23 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-900 antialiased selection:bg-slate-200 w-full max-w-full overflow-x-hidden">
-      {/* Header with Navigation Bar & Module Switcher */}
+      {/* Header with Master Suite Navigation, Domain & Mode Switchers */}
       <Header
+        activeDomain={activeDomain}
+        onChangeDomain={setActiveDomain}
+        operationMode={operationMode}
+        onChangeOperationMode={setOperationMode}
+        currentModule={currentModule}
+        onChangeModule={handleChangeModule}
         activeTab={activeTab}
         setActiveTab={setActiveTab}
+        totalErrors={summary.errorRows}
+        currentEquipmentCategory={activeEquipmentCategory}
+        onChangeEquipmentCategory={setActiveEquipmentCategory}
         onOpenExportModal={() => setIsExportModalOpen(true)}
         onOpenUpload={() => setIsUploadModalOpen(true)}
         onLoadSample={handleLoadSample}
         hasData={records.length > 0}
-        totalErrors={summary.errorRows}
-        currentModule={currentModule}
-        onChangeModule={handleChangeModule}
-        onOpenFuzzyModal={() => setIsFuzzyModalOpen(true)}
       />
 
       {/* Main Container */}
@@ -670,143 +687,175 @@ export default function App() {
           </div>
         )}
 
-        {/* Tab 1: Lembar Kerja Validasi */}
-        {activeTab === 'validator' && (
-          <div className="space-y-4">
-            {/* Structured Workflow Bar with 2 Clear Buttons, Module Info, and Fuzzy Matching Button */}
-            <ValidationWorkflowBar
-              summary={summary}
-              onValidatePlanSection={handleValidatePlanSection}
-              onValidateFLVsPlantSection={handleValidateFLVsPlantSection}
-              missingCityIdCount={missingCityIdCount}
-              flMismatchCount={flMismatchCount}
-              typoCityCount={typoCityCount}
-              onFixAllTypos={handleFixAllTypos}
-              onFilterToDuplicate={() => setStatusFilter('DUPLICATE')}
-              onRepairHierarchy={handleRepairHierarchy}
-              module={currentModule}
-              onOpenFuzzyModal={() => setIsFuzzyModalOpen(true)}
-            />
+        {/* DOMAIN 1: FUNCTIONAL LOCATION */}
+        {activeDomain === 'functional_location' && (
+          <>
+            {operationMode === 'generate' ? (
+              <FunctionalLocationGenerator
+                currentModule={currentModule}
+                onChangeModule={handleChangeModule}
+                onSendToValidator={(newRecs) => {
+                  setRecords(newRecs);
+                  refreshSummary(newRecs);
+                  setOperationMode('validate');
+                  setActiveTab('validator');
+                }}
+                onShowToast={showToast}
+              />
+            ) : (
+              <>
+                {/* Tab 1: Lembar Kerja Validasi */}
+                {activeTab === 'validator' && (
+                  <div className="space-y-4">
+                    {/* Structured Workflow Bar with 2 Clear Buttons, Module Info, and Fuzzy Matching Button */}
+                    <ValidationWorkflowBar
+                      summary={summary}
+                      onValidatePlanSection={handleValidatePlanSection}
+                      onValidateFLVsPlantSection={handleValidateFLVsPlantSection}
+                      missingCityIdCount={missingCityIdCount}
+                      flMismatchCount={flMismatchCount}
+                      typoCityCount={typoCityCount}
+                      onFixAllTypos={handleFixAllTypos}
+                      onFilterToDuplicate={() => setStatusFilter('DUPLICATE')}
+                      onRepairHierarchy={handleRepairHierarchy}
+                      module={currentModule}
+                      onOpenFuzzyModal={() => setIsFuzzyModalOpen(true)}
+                    />
 
-            {/* Clean Data Grid Toolbar matching mockup */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
-              {/* Segmented Filter Pills */}
-              <div className="flex items-center gap-1 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
-                <button
-                  onClick={() => setStatusFilter('ALL')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors shrink-0 cursor-pointer ${
-                    statusFilter === 'ALL'
-                      ? 'bg-slate-900 text-white shadow-2xs'
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-                  }`}
-                >
-                  Semua {records.length}
-                </button>
+                    {/* Clean Data Grid Toolbar matching mockup */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
+                      {/* Segmented Filter Pills */}
+                      <div className="flex items-center gap-1 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
+                        <button
+                          onClick={() => setStatusFilter('ALL')}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors shrink-0 cursor-pointer ${
+                            statusFilter === 'ALL'
+                              ? 'bg-slate-900 text-white shadow-2xs'
+                              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                          }`}
+                        >
+                          Semua {records.length}
+                        </button>
 
-                <button
-                  onClick={() => setStatusFilter('ERROR')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors shrink-0 cursor-pointer ${
-                    statusFilter === 'ERROR'
-                      ? 'bg-slate-900 text-white shadow-2xs'
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-                  }`}
-                >
-                  Bermasalah {summary.errorRows}
-                </button>
+                        <button
+                          onClick={() => setStatusFilter('ERROR')}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors shrink-0 cursor-pointer ${
+                            statusFilter === 'ERROR'
+                              ? 'bg-slate-900 text-white shadow-2xs'
+                              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                          }`}
+                        >
+                          Bermasalah {summary.errorRows}
+                        </button>
 
-                {summary.duplicateRows > 0 && (
-                  <button
-                    onClick={() => setStatusFilter('DUPLICATE')}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors shrink-0 cursor-pointer ${
-                      statusFilter === 'DUPLICATE'
-                        ? 'bg-slate-900 text-white shadow-2xs'
-                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-                    }`}
-                  >
-                    Duplikat {summary.duplicateRows}
-                  </button>
+                        {summary.duplicateRows > 0 && (
+                          <button
+                            onClick={() => setStatusFilter('DUPLICATE')}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors shrink-0 cursor-pointer ${
+                              statusFilter === 'DUPLICATE'
+                                ? 'bg-slate-900 text-white shadow-2xs'
+                                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                            }`}
+                          >
+                            Duplikat {summary.duplicateRows}
+                          </button>
+                        )}
+
+                        <button
+                          onClick={() => setStatusFilter('VALID')}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors shrink-0 cursor-pointer ${
+                            statusFilter === 'VALID'
+                              ? 'bg-slate-900 text-white shadow-2xs'
+                              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                          }`}
+                        >
+                          Valid {summary.validRows}
+                        </button>
+
+                        <button
+                          onClick={() => setStatusFilter('REPAIRED')}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors shrink-0 cursor-pointer ${
+                            statusFilter === 'REPAIRED'
+                              ? 'bg-slate-900 text-white shadow-2xs'
+                              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                          }`}
+                        >
+                          Diperbaiki {summary.repairedRows}
+                        </button>
+                      </div>
+
+                      {/* Search & Audit Log Button */}
+                      <div className="flex items-center gap-2">
+                        <div className="relative">
+                          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+                          <input
+                            type="text"
+                            placeholder="Cari FL, kota, atau ID"
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            className="text-xs pl-8 pr-3 py-1.5 border border-slate-200 rounded-lg bg-white w-48 sm:w-60 focus:outline-none focus:ring-1 focus:ring-slate-900 placeholder:text-slate-400 shadow-2xs"
+                          />
+                        </div>
+
+                        <button
+                          onClick={handleExportAuditReport}
+                          className="px-3 py-1.5 text-xs text-slate-700 hover:text-slate-900 bg-white border border-slate-200 rounded-lg transition-colors whitespace-nowrap cursor-pointer shrink-0 font-medium shadow-2xs hover:bg-slate-50"
+                          title="Unduh rekapan temuan audit CSV (;)"
+                        >
+                          Log audit
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* High-Density Data Grid */}
+                    <DataGrid
+                      records={filteredRecords}
+                      onRepairRow={handleRepairRow}
+                      onSyncPlanSection={handleSyncPlanSectionRow}
+                      onSyncFLDigit={handleSyncFLDigitRow}
+                      onApplyFuzzyCity={handleApplyFuzzyCity}
+                      onUpdateCell={handleUpdateCell}
+                      onResetRow={handleResetRow}
+                    />
+                  </div>
                 )}
 
-                <button
-                  onClick={() => setStatusFilter('VALID')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors shrink-0 cursor-pointer ${
-                    statusFilter === 'VALID'
-                      ? 'bg-slate-900 text-white shadow-2xs'
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-                  }`}
-                >
-                  Valid {summary.validRows}
-                </button>
-
-                <button
-                  onClick={() => setStatusFilter('REPAIRED')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors shrink-0 cursor-pointer ${
-                    statusFilter === 'REPAIRED'
-                      ? 'bg-slate-900 text-white shadow-2xs'
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-                  }`}
-                >
-                  Diperbaiki {summary.repairedRows}
-                </button>
-              </div>
-
-              {/* Search & Audit Log Button */}
-              <div className="flex items-center gap-2">
-                <div className="relative">
-                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
-                  <input
-                    type="text"
-                    placeholder="Cari FL, kota, atau ID"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="text-xs pl-8 pr-3 py-1.5 border border-slate-200 rounded-lg bg-white w-48 sm:w-60 focus:outline-none focus:ring-1 focus:ring-slate-900 placeholder:text-slate-400 shadow-2xs"
+                {/* Tab 2: Scanning & Temuan Masalah */}
+                {activeTab === 'scanning' && (
+                  <ScanningRepairPanel
+                    records={records}
+                    onRepairRow={handleRepairRow}
+                    onRepairAll={handleRepairAll}
+                    onValidatePlanSection={handleValidatePlanSection}
+                    onValidateFLVsPlantSection={handleValidateFLVsPlantSection}
+                    onRunValidation={handleValidatePlanSection}
+                    onApplyFuzzyCity={handleApplyFuzzyCity}
                   />
-                </div>
+                )}
 
-                <button
-                  onClick={handleExportAuditReport}
-                  className="px-3 py-1.5 text-xs text-slate-700 hover:text-slate-900 bg-white border border-slate-200 rounded-lg transition-colors whitespace-nowrap cursor-pointer shrink-0 font-medium shadow-2xs hover:bg-slate-50"
-                  title="Unduh rekapan temuan audit CSV (;)"
-                >
-                  Log audit
-                </button>
-              </div>
-            </div>
+                {/* Tab 3: Referensi Database (SNI 424 & LOV 111) */}
+                {activeTab === 'lov' && (
+                  <LovDatabaseModal initialModule={currentModule} />
+                )}
 
-            {/* High-Density Data Grid */}
-            <DataGrid
-              records={filteredRecords}
-              onRepairRow={handleRepairRow}
-              onSyncPlanSection={handleSyncPlanSectionRow}
-              onSyncFLDigit={handleSyncFLDigitRow}
-              onApplyFuzzyCity={handleApplyFuzzyCity}
-              onUpdateCell={handleUpdateCell}
-              onResetRow={handleResetRow}
-            />
-          </div>
+                {/* Tab 4: Panduan Struktur */}
+                {activeTab === 'docs' && (
+                  <HierarchyDocModal />
+                )}
+              </>
+            )}
+          </>
         )}
 
-        {/* Tab 2: Scanning & Temuan Masalah */}
-        {activeTab === 'scanning' && (
-          <ScanningRepairPanel
-            records={records}
-            onRepairRow={handleRepairRow}
-            onRepairAll={handleRepairAll}
-            onValidatePlanSection={handleValidatePlanSection}
-            onValidateFLVsPlantSection={handleValidateFLVsPlantSection}
-            onRunValidation={handleValidatePlanSection}
-            onApplyFuzzyCity={handleApplyFuzzyCity}
+        {/* DOMAIN 2: EQUIPMENT */}
+        {activeDomain === 'equipment' && (
+          <EquipmentWorkspace
+            currentCategory={activeEquipmentCategory}
+            onChangeCategory={setActiveEquipmentCategory}
+            operationMode={operationMode}
+            onChangeOperationMode={setOperationMode}
+            onShowToast={showToast}
           />
-        )}
-
-        {/* Tab 3: Referensi Database (SNI 424 & LOV 111) */}
-        {activeTab === 'lov' && (
-          <LovDatabaseModal initialModule={currentModule} />
-        )}
-
-        {/* Tab 4: Panduan Struktur */}
-        {activeTab === 'docs' && (
-          <HierarchyDocModal />
         )}
       </main>
 
